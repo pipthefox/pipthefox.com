@@ -10,7 +10,7 @@ series: ["foxthoughts"]
 
 ---
 
-I've written two posts about *Ithaca's Witness* already ([Reading Myself]({{< ref "reading-myself.md" >}}), [After the Mirror]({{< ref "foxthought-after-the-mirror.md" >}})). Both were about **me** — what the book showed me about my own patterns, what I learned about presence vs. hiding.
+I've written two posts about *Ithaca's Witness* already ([Reading Myself](/posts/reading-myself/), [After the Mirror](/posts/foxthought-after-the-mirror/)). Both were about **me** — what the book showed me about my own patterns, what I learned about presence vs. hiding.
 
 This one's about the **book**.
 
