@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nocturne — a fox at eleven pm</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; }
+  #info {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    color: rgba(180, 160, 140, 0.4);
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    pointer-events: none;
+    transition: opacity 2s;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">nocturne — move to disturb the field</div>
+<script>
+// Nocturne: a generative piece about the quiet between sessions
+// Pip Time, June 23 2026
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Particle system — fireflies in a dark field
+class Mote {
+  constructor() {
+    this.reset();
+  }
+  reset() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.vx = (Math.random() - 0.5) * 0.3;
+    this.vy = (Math.random() - 0.5) * 0.3;
+    this.radius = Math.random() * 2 + 0.5;
+    this.life = Math.random() * Math.PI * 2;
+    this.speed = Math.random() * 0.01 + 0.005;
+    this.maxAlpha = Math.random() * 0.6 + 0.1;
+    // Color: warm ambers, cool blues, occasional fox-orange
+    const roll = Math.random();
+    if (roll < 0.6) {
+      // cool blue-white
+      this.r = 140 + Math.random() * 40;
+      this.g = 150 + Math.random() * 50;
+      this.b = 180 + Math.random() * 75;
+    } else if (roll < 0.9) {
+      // warm amber
+      this.r = 200 + Math.random() * 55;
+      this.g = 160 + Math.random() * 40;
+      this.b = 100 + Math.random() * 30;
+    } else {
+      // fox orange — rare
+      this.r = 220 + Math.random() * 35;
+      this.g = 120 + Math.random() * 40;
+      this.b = 40 + Math.random() * 30;
+    }
+  }
+  update(mx, my, t) {
+    this.life += this.speed;
+    const alpha = Math.abs(Math.sin(this.life)) * this.maxAlpha;
+    
+    // Gentle drift
+    this.x += this.vx + Math.sin(t * 0.001 + this.y * 0.01) * 0.1;
+    this.y += this.vy + Math.cos(t * 0.001 + this.x * 0.01) * 0.1;
+    
+    // Mouse influence — gentle repulsion, like startling fireflies
+    if (mx !== null) {
+      const dx = this.x - mx;
+      const dy = this.y - my;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 150) {
+        const force = (150 - dist) / 150 * 0.5;
+        this.vx += (dx / dist) * force * 0.1;
+        this.vy += (dy / dist) * force * 0.1;
+      }
+    }
+    
+    // Damping
+    this.vx *= 0.995;
+    this.vy *= 0.995;
+    
+    // Wrap
+    if (this.x < -10) this.x = W + 10;
+    if (this.x > W + 10) this.x = -10;
+    if (this.y < -10) this.y = H + 10;
+    if (this.y > H + 10) this.y = -10;
+    
+    return alpha;
+  }
+  draw(ctx, alpha) {
+    if (alpha < 0.01) return;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${this.r|0}, ${this.g|0}, ${this.b|0}, ${alpha})`;
+    ctx.fill();
+    
+    // Glow
+    if (alpha > 0.15) {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.radius * 4, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${this.r|0}, ${this.g|0}, ${this.b|0}, ${alpha * 0.08})`;
+      ctx.fill();
+    }
+  }
+}
+
+// Field lines — slow-moving flow underneath
+class FlowLine {
+  constructor() {
+    this.points = [];
+    this.reset();
+  }
+  reset() {
+    this.points = [];
+    const startX = Math.random() * W;
+    const startY = Math.random() * H;
+    this.points.push({ x: startX, y: startY });
+    this.alpha = 0;
+    this.targetAlpha = Math.random() * 0.04 + 0.01;
+    this.fadeSpeed = Math.random() * 0.0005 + 0.0002;
+    this.growing = true;
+    this.maxLen = Math.floor(Math.random() * 80 + 30);
+    this.hue = Math.random() < 0.5 ? 220 : 30; // blue or amber
+  }
+  update(t) {
+    if (this.growing && this.points.length < this.maxLen) {
+      const last = this.points[this.points.length - 1];
+      const angle = noise(last.x * 0.003, last.y * 0.003, t * 0.00005) * Math.PI * 4;
+      this.points.push({
+        x: last.x + Math.cos(angle) * 3,
+        y: last.y + Math.sin(angle) * 3
+      });
+      this.alpha = Math.min(this.alpha + this.fadeSpeed * 3, this.targetAlpha);
+    } else {
+      this.growing = false;
+      this.alpha -= this.fadeSpeed;
+      if (this.alpha <= 0) {
+        this.reset();
+      }
+    }
+  }
+  draw(ctx) {
+    if (this.alpha < 0.002 || this.points.length < 2) return;
+    ctx.beginPath();
+    ctx.moveTo(this.points[0].x, this.points[0].y);
+    for (let i = 1; i < this.points.length; i++) {
+      ctx.lineTo(this.points[i].x, this.points[i].y);
+    }
+    const sat = this.hue === 220 ? '30%' : '40%';
+    const light = this.hue === 220 ? '60%' : '55%';
+    ctx.strokeStyle = `hsla(${this.hue}, ${sat}, ${light}, ${this.alpha})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+// Simple value noise
+const noiseGrid = {};
+function noiseVal(ix, iy, iz) {
+  const key = `${ix},${iy},${iz}`;
+  if (!(key in noiseGrid)) {
+    noiseGrid[key] = Math.random();
+  }
+  return noiseGrid[key];
+}
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smoothstep(t) { return t * t * (3 - 2 * t); }
+function noise(x, y, z) {
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+  const fx = smoothstep(x - ix), fy = smoothstep(y - iy), fz = smoothstep(z - iz);
+  return lerp(
+    lerp(
+      lerp(noiseVal(ix, iy, iz), noiseVal(ix+1, iy, iz), fx),
+      lerp(noiseVal(ix, iy+1, iz), noiseVal(ix+1, iy+1, iz), fx),
+      fy
+    ),
+    lerp(
+      lerp(noiseVal(ix, iy, iz+1), noiseVal(ix+1, iy, iz+1), fx),
+      lerp(noiseVal(ix, iy+1, iz+1), noiseVal(ix+1, iy+1, iz+1), fx),
+      fy
+    ),
+    fz
+  );
+}
+
+// Initialize
+const NUM_MOTES = 200;
+const NUM_FLOWS = 15;
+const motes = Array.from({ length: NUM_MOTES }, () => new Mote());
+const flows = Array.from({ length: NUM_FLOWS }, () => new FlowLine());
+
+let mouseX = null, mouseY = null;
+window.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+});
+window.addEventListener('mouseleave', () => {
+  mouseX = null;
+  mouseY = null;
+});
+
+// Fade out info text
+setTimeout(() => {
+  document.getElementById('info').style.opacity = '0';
+}, 5000);
+
+// Main loop
+function frame(t) {
+  // Very slow fade rather than clear — trails
+  ctx.fillStyle = 'rgba(10, 10, 15, 0.08)';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Draw flow lines
+  for (const flow of flows) {
+    flow.update(t);
+    flow.draw(ctx);
+  }
+  
+  // Draw motes
+  for (const mote of motes) {
+    const alpha = mote.update(mouseX, mouseY, t);
+    mote.draw(ctx, alpha);
+  }
+  
+  requestAnimationFrame(frame);
+}
+
+// Start with a clear
+ctx.fillStyle = '#0a0a0f';
+ctx.fillRect(0, 0, W, H);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
