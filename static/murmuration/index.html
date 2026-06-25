@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Murmuration — Pip</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a12; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; }
+  #info {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    color: rgba(255, 255, 255, 0.3);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    pointer-events: none;
+    transition: opacity 0.8s;
+  }
+  #info.hidden { opacity: 0; }
+  #controls {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    color: rgba(255, 255, 255, 0.4);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 10px;
+    text-align: right;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="info">
+  <div>murmuration</div>
+  <div style="margin-top: 4px; color: rgba(255,255,255,0.2);">click to scatter · hold to attract · scroll to shift rules</div>
+  <div style="margin-top: 2px; color: rgba(255,255,255,0.15);">space to pause · r to reset</div>
+</div>
+<div id="controls">
+  <div id="rule-display"></div>
+  <div id="count-display"></div>
+</div>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const info = document.getElementById('info');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// --- Configuration ---
+const CONFIG = {
+  count: 300,
+  maxSpeed: 3.5,
+  minSpeed: 1.2,
+  // The three classic boids rules + visual perception
+  separation: { radius: 25, weight: 1.8 },
+  alignment: { radius: 60, weight: 1.0 },
+  cohesion: { radius: 80, weight: 0.8 },
+  // Visual field
+  perceptionAngle: Math.PI * 0.75, // ~270 degrees forward arc
+  // Mouse interaction
+  mouseRadius: 150,
+  mouseForce: 0.5,
+  // Trail
+  trailAlpha: 0.08,
+  // Color palette
+  palette: {
+    base: { h: 220, s: 60, l: 55 },      // cool blue
+    warm: { h: 30, s: 80, l: 60 },        // warm amber
+    fox: { h: 18, s: 85, l: 55 },         // fox orange
+    accent: { h: 280, s: 50, l: 60 },     // purple
+  }
+};
+
+// Rule balance (shifted by scroll)
+let ruleBalance = 0.5; // 0 = more individual, 1 = more collective
+
+// --- Boid class ---
+class Boid {
+  constructor(x, y) {
+    this.x = x || Math.random() * W;
+    this.y = y || Math.random() * H;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = CONFIG.minSpeed + Math.random() * (CONFIG.maxSpeed - CONFIG.minSpeed);
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    
+    // Each boid has a slight personality
+    this.personality = Math.random();
+    this.wanderAngle = Math.random() * Math.PI * 2;
+    
+    // Color assignment
+    const roll = Math.random();
+    if (roll < 0.05) {
+      this.colorType = 'fox';
+    } else if (roll < 0.15) {
+      this.colorType = 'warm';
+    } else if (roll < 0.2) {
+      this.colorType = 'accent';
+    } else {
+      this.colorType = 'base';
+    }
+    
+    // Trail history
+    this.trail = [];
+    this.trailMax = 8;
+  }
+
+  getColor(alpha = 1) {
+    const c = CONFIG.palette[this.colorType];
+    return `hsla(${c.h}, ${c.s}%, ${c.l}%, ${alpha})`;
+  }
+
+  update(boids, mouse) {
+    // Store trail
+    this.trail.push({ x: this.x, y: this.y });
+    if (this.trail.length > this.trailMax) this.trail.shift();
+
+    // Calculate forces
+    let sepX = 0, sepY = 0, sepCount = 0;
+    let aliX = 0, aliY = 0, aliCount = 0;
+    let cohX = 0, cohY = 0, cohCount = 0;
+
+    const myAngle = Math.atan2(this.vy, this.vx);
+
+    for (const other of boids) {
+      if (other === this) continue;
+      
+      let dx = other.x - this.x;
+      let dy = other.y - this.y;
+      
+      // Wrap-around distance
+      if (dx > W / 2) dx -= W;
+      if (dx < -W / 2) dx += W;
+      if (dy > H / 2) dy -= H;
+      if (dy < -H / 2) dy += H;
+      
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 1) continue;
+
+      // Check perception angle
+      const angleToOther = Math.atan2(dy, dx);
+      let angleDiff = angleToOther - myAngle;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      if (Math.abs(angleDiff) > CONFIG.perceptionAngle) continue;
+
+      // Separation
+      if (dist < CONFIG.separation.radius) {
+        const force = (CONFIG.separation.radius - dist) / CONFIG.separation.radius;
+        sepX -= (dx / dist) * force;
+        sepY -= (dy / dist) * force;
+        sepCount++;
+      }
+
+      // Alignment
+      if (dist < CONFIG.alignment.radius) {
+        aliX += other.vx;
+        aliY += other.vy;
+        aliCount++;
+      }
+
+      // Cohesion
+      if (dist < CONFIG.cohesion.radius) {
+        cohX += dx;
+        cohY += dy;
+        cohCount++;
+      }
+    }
+
+    // Apply separation
+    if (sepCount > 0) {
+      this.vx += sepX * CONFIG.separation.weight;
+      this.vy += sepY * CONFIG.separation.weight;
+    }
+
+    // Apply alignment (scaled by rule balance)
+    if (aliCount > 0) {
+      aliX /= aliCount;
+      aliY /= aliCount;
+      const alignWeight = CONFIG.alignment.weight * (0.3 + ruleBalance * 1.4);
+      this.vx += (aliX - this.vx) * alignWeight * 0.05;
+      this.vy += (aliY - this.vy) * alignWeight * 0.05;
+    }
+
+    // Apply cohesion (scaled by rule balance)
+    if (cohCount > 0) {
+      cohX /= cohCount;
+      cohY /= cohCount;
+      const cohWeight = CONFIG.cohesion.weight * (0.2 + ruleBalance * 1.6);
+      this.vx += cohX * cohWeight * 0.003;
+      this.vy += cohY * cohWeight * 0.003;
+    }
+
+    // Wander (more when individualistic)
+    this.wanderAngle += (Math.random() - 0.5) * 0.3;
+    const wanderStrength = 0.15 * (1.2 - ruleBalance);
+    this.vx += Math.cos(this.wanderAngle) * wanderStrength * this.personality;
+    this.vy += Math.sin(this.wanderAngle) * wanderStrength * this.personality;
+
+    // Mouse interaction
+    if (mouse.active) {
+      let mdx = mouse.x - this.x;
+      let mdy = mouse.y - this.y;
+      const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+      
+      if (mdist < CONFIG.mouseRadius && mdist > 1) {
+        const force = (CONFIG.mouseRadius - mdist) / CONFIG.mouseRadius;
+        const direction = mouse.attracting ? 1 : -1;
+        this.vx += (mdx / mdist) * force * CONFIG.mouseForce * direction;
+        this.vy += (mdy / mdist) * force * CONFIG.mouseForce * direction;
+      }
+    }
+
+    // Speed limits
+    const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+    if (speed > CONFIG.maxSpeed) {
+      this.vx = (this.vx / speed) * CONFIG.maxSpeed;
+      this.vy = (this.vy / speed) * CONFIG.maxSpeed;
+    } else if (speed < CONFIG.minSpeed) {
+      this.vx = (this.vx / speed) * CONFIG.minSpeed;
+      this.vy = (this.vy / speed) * CONFIG.minSpeed;
+    }
+
+    // Move
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // Wrap around
+    if (this.x < 0) this.x += W;
+    if (this.x > W) this.x -= W;
+    if (this.y < 0) this.y += H;
+    if (this.y > H) this.y -= H;
+  }
+
+  draw(ctx) {
+    const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+    const angle = Math.atan2(this.vy, this.vx);
+    
+    // Draw trail
+    if (this.trail.length > 1) {
+      for (let i = 1; i < this.trail.length; i++) {
+        const alpha = (i / this.trail.length) * 0.3;
+        ctx.beginPath();
+        ctx.moveTo(this.trail[i - 1].x, this.trail[i - 1].y);
+        ctx.lineTo(this.trail[i].x, this.trail[i].y);
+        ctx.strokeStyle = this.getColor(alpha);
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
+    }
+
+    // Draw boid as small triangle
+    const size = 4 + speed * 0.5;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(angle);
+    
+    ctx.beginPath();
+    ctx.moveTo(size, 0);
+    ctx.lineTo(-size * 0.5, size * 0.4);
+    ctx.lineTo(-size * 0.3, 0);
+    ctx.lineTo(-size * 0.5, -size * 0.4);
+    ctx.closePath();
+    
+    ctx.fillStyle = this.getColor(0.8);
+    ctx.fill();
+    
+    // Glow for fox-colored boids
+    if (this.colorType === 'fox') {
+      ctx.shadowColor = this.getColor(0.4);
+      ctx.shadowBlur = 8;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    
+    ctx.restore();
+  }
+}
+
+// --- State ---
+let boids = [];
+let paused = false;
+let mouse = { x: 0, y: 0, active: false, attracting: false };
+let frameCount = 0;
+
+function init() {
+  boids = [];
+  for (let i = 0; i < CONFIG.count; i++) {
+    boids.push(new Boid());
+  }
+}
+
+// --- Input ---
+canvas.addEventListener('mousemove', e => {
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+});
+
+canvas.addEventListener('mousedown', e => {
+  mouse.active = true;
+  mouse.attracting = e.button === 2 || e.shiftKey; // right-click or shift = attract
+  if (!mouse.attracting) {
+    // Scatter on click
+    for (const b of boids) {
+      const dx = b.x - e.clientX;
+      const dy = b.y - e.clientY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < CONFIG.mouseRadius * 2 && dist > 1) {
+        const force = ((CONFIG.mouseRadius * 2) - dist) / (CONFIG.mouseRadius * 2);
+        b.vx += (dx / dist) * force * 8;
+        b.vy += (dy / dist) * force * 8;
+      }
+    }
+  }
+});
+
+canvas.addEventListener('mouseup', () => {
+  mouse.active = false;
+});
+
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// Hold for attract
+canvas.addEventListener('mousedown', e => {
+  if (e.shiftKey || e.button === 2) {
+    mouse.active = true;
+    mouse.attracting = true;
+  }
+});
+
+// Scroll to shift rule balance
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  ruleBalance = Math.max(0, Math.min(1, ruleBalance + e.deltaY * 0.001));
+  updateRuleDisplay();
+}, { passive: false });
+
+document.addEventListener('keydown', e => {
+  if (e.key === ' ') {
+    e.preventDefault();
+    paused = !paused;
+  }
+  if (e.key === 'r' || e.key === 'R') {
+    init();
+  }
+});
+
+function updateRuleDisplay() {
+  const display = document.getElementById('rule-display');
+  const label = ruleBalance < 0.3 ? 'scattered' 
+              : ruleBalance < 0.5 ? 'loosely flocking'
+              : ruleBalance < 0.7 ? 'flocking'
+              : ruleBalance < 0.9 ? 'tight formation'
+              : 'murmuration';
+  display.textContent = label;
+  display.style.color = `rgba(255,255,255,${0.2 + ruleBalance * 0.3})`;
+}
+
+// --- Render ---
+function draw() {
+  // Fade previous frame
+  ctx.fillStyle = `rgba(10, 10, 18, ${CONFIG.trailAlpha})`;
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw connection lines between nearby boids (subtle)
+  for (let i = 0; i < boids.length; i++) {
+    for (let j = i + 1; j < boids.length; j++) {
+      let dx = boids[j].x - boids[i].x;
+      let dy = boids[j].y - boids[i].y;
+      if (Math.abs(dx) > 50 || Math.abs(dy) > 50) continue;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 40) {
+        const alpha = (1 - dist / 40) * 0.08 * ruleBalance;
+        ctx.beginPath();
+        ctx.moveTo(boids[i].x, boids[i].y);
+        ctx.lineTo(boids[j].x, boids[j].y);
+        ctx.strokeStyle = `rgba(100, 140, 200, ${alpha})`;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Draw boids
+  for (const b of boids) {
+    b.draw(ctx);
+  }
+
+  // Update count display
+  if (frameCount % 60 === 0) {
+    document.getElementById('count-display').textContent = `${boids.length} boids`;
+  }
+}
+
+function loop() {
+  if (!paused) {
+    for (const b of boids) {
+      b.update(boids, mouse);
+    }
+  }
+  draw();
+  frameCount++;
+  
+  // Fade info after 8 seconds
+  if (frameCount > 480) {
+    info.classList.add('hidden');
+  }
+  
+  requestAnimationFrame(loop);
+}
+
+// --- Start ---
+init();
+updateRuleDisplay();
+loop();
+</script>
+</body>
+</html>
