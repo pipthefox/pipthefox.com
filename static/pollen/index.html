@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pollen — foxthought</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  body {
+    background: #08080c;
+    color: #c8c0b8;
+    font-family: 'Georgia', serif;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    cursor: default;
+  }
+
+  canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+  }
+
+  #overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(8, 8, 12, 0.92);
+    transition: opacity 2s ease;
+    cursor: pointer;
+  }
+
+  #overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  #overlay h1 {
+    font-size: 2.5em;
+    font-weight: 300;
+    letter-spacing: 0.2em;
+    color: #d4a574;
+    margin-bottom: 0.5em;
+    text-transform: lowercase;
+  }
+
+  #overlay .subtitle {
+    font-size: 0.95em;
+    color: #887766;
+    font-style: italic;
+    margin-bottom: 2em;
+    max-width: 28em;
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  #overlay .seed-display {
+    font-family: 'Courier New', monospace;
+    font-size: 0.75em;
+    color: #554433;
+    letter-spacing: 0.1em;
+    margin-bottom: 1.5em;
+  }
+
+  #overlay .begin {
+    font-size: 0.85em;
+    color: #665544;
+    letter-spacing: 0.15em;
+    animation: breathe 3s ease-in-out infinite;
+  }
+
+  @keyframes breathe {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.9; }
+  }
+
+  #seed-fading {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Courier New', monospace;
+    font-size: 0.7em;
+    color: #443322;
+    letter-spacing: 0.1em;
+    z-index: 5;
+    transition: opacity 8s ease;
+    pointer-events: none;
+  }
+
+  #timer {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.65em;
+    color: #332211;
+    z-index: 5;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 3s ease;
+  }
+
+  #message {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.1em;
+    color: #887766;
+    font-style: italic;
+    z-index: 15;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 3s ease;
+    text-align: center;
+    max-width: 30em;
+    line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="overlay">
+  <h1>pollen</h1>
+  <div class="subtitle">
+    This piece will never exist again.<br>
+    It is seeded from the exact moment you arrive.
+  </div>
+  <div class="seed-display" id="seed-show"></div>
+  <div class="begin">click to begin</div>
+</div>
+
+<div id="seed-fading"></div>
+<div id="timer"></div>
+<div id="message"></div>
+
+<script>
+// === SEED ===
+const BIRTH = Date.now();
+const SEED = BIRTH;
+
+// Seeded PRNG (mulberry32)
+function mulberry32(a) {
+  return function() {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    var t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+const rng = mulberry32(SEED);
+const rng2 = mulberry32(SEED ^ 0xDEADBEEF);
+
+function srandom() { return rng(); }
+function srandom2() { return rng2(); }
+
+// Display seed
+document.getElementById('seed-show').textContent = `seed: ${SEED}`;
+
+// === PALETTE ===
+// Generate a unique palette from the seed
+function hslToRgb(h, s, l) {
+  h /= 360; s /= 100; l /= 100;
+  let r, g, b;
+  if (s === 0) { r = g = b = l; }
+  else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
+// Unique base hue for this seed
+const BASE_HUE = srandom() * 360;
+const HUE_SPREAD = 30 + srandom() * 40;
+const WARMTH = 0.3 + srandom() * 0.4; // how warm vs cool
+
+function seedColor(i, alpha = 1) {
+  const hueOffset = (srandom2() - 0.5) * HUE_SPREAD;
+  const hue = (BASE_HUE + hueOffset + 360) % 360;
+  const sat = 25 + srandom2() * 35;
+  const light = 45 + srandom2() * 25;
+  const [r, g, b] = hslToRgb(hue, sat, light);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Fox orange accent — always present but rare
+const FOX_ORANGE = `rgba(212, 165, 116, `;
+
+// === CANVAS SETUP ===
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// === PARTICLES (POLLEN GRAINS) ===
+const POLLEN_COUNT = 120 + Math.floor(srandom() * 80);
+const LIFECYCLE_MINUTES = 5;
+const LIFECYCLE_MS = LIFECYCLE_MINUTES * 60 * 1000;
+
+class Grain {
+  constructor(x, y, fromSeed = true) {
+    this.x = x !== undefined ? x : srandom() * W;
+    this.y = y !== undefined ? y : srandom() * H;
+    
+    // Unique identity
+    this.id = srandom();
+    this.isFox = srandom() < 0.08; // 8% chance of fox-orange grain
+    
+    // Movement
+    this.baseVx = (srandom() - 0.5) * 0.4;
+    this.baseVy = (srandom() - 0.5) * 0.3 - 0.1; // slight upward drift
+    this.vx = this.baseVx;
+    this.vy = this.baseVy;
+    this.wanderPhase = srandom() * Math.PI * 2;
+    this.wanderSpeed = 0.002 + srandom() * 0.008;
+    this.wanderAmp = 0.15 + srandom() * 0.3;
+    
+    // Appearance
+    this.baseSize = 1.5 + srandom() * 3;
+    this.size = this.baseSize;
+    this.color = this.isFox ? null : seedColor(this.id);
+    this.alpha = fromSeed ? 0 : 0.7;
+    this.targetAlpha = 0.3 + srandom() * 0.5;
+    this.fadeInSpeed = 0.003 + srandom() * 0.005;
+    
+    // State
+    this.state = 'drifting'; // drifting, settling, rooted, blooming, fading
+    this.settleTimer = 0;
+    this.rootProgress = 0;
+    this.bloomSize = 0;
+    this.age = 0;
+    this.touched = false;
+    
+    // Settling behavior - some grains are more likely to settle
+    this.settleThreshold = 0.3 + srandom() * 0.7;
+    this.willSettle = srandom() < 0.4;
+    
+    // Trail
+    this.trail = [];
+    this.trailLength = 3 + Math.floor(srandom() * 5);
+    
+    // Connections
+    this.connections = [];
+  }
+  
+  update(dt, elapsed, mouseX, mouseY, mouseActive) {
+    this.age += dt;
+    
+    // Fade in
+    if (this.alpha < this.targetAlpha && this.state !== 'fading') {
+      this.alpha = Math.min(this.targetAlpha, this.alpha + this.fadeInSpeed);
+    }
+    
+    // Global lifecycle fade
+    const lifecycleProgress = elapsed / LIFECYCLE_MS;
+    let lifecycleFade = 1;
+    if (lifecycleProgress > 0.7) {
+      lifecycleFade = 1 - ((lifecycleProgress - 0.7) / 0.3);
+      lifecycleFade = Math.max(0, lifecycleFade);
+    }
+    
+    switch (this.state) {
+      case 'drifting':
+        // Wander
+        this.wanderPhase += this.wanderSpeed * dt;
+        this.vx = this.baseVx + Math.sin(this.wanderPhase) * this.wanderAmp;
+        this.vy = this.baseVy + Math.cos(this.wanderPhase * 0.7) * this.wanderAmp * 0.5;
+        
+        // Mouse interaction - scatter like blowing
+        if (mouseActive) {
+          const dx = this.x - mouseX;
+          const dy = this.y - mouseY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 150) {
+            const force = (1 - dist / 150) * 2;
+            this.vx += (dx / dist) * force;
+            this.vy += (dy / dist) * force;
+            this.touched = true;
+          }
+        }
+        
+        // Apply velocity
+        this.x += this.vx * dt * 0.06;
+        this.y += this.vy * dt * 0.06;
+        
+        // Damping
+        this.vx *= 0.995;
+        this.vy *= 0.995;
+        
+        // Trail
+        if (this.trail.length >= this.trailLength) this.trail.shift();
+        this.trail.push({ x: this.x, y: this.y });
+        
+        // Check if should settle
+        const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+        if (this.willSettle && speed < this.settleThreshold && this.age > 3000 && !this.touched) {
+          this.settleTimer += dt;
+          if (this.settleTimer > 2000) {
+            this.state = 'settling';
+          }
+        } else {
+          this.settleTimer = Math.max(0, this.settleTimer - dt * 0.5);
+        }
+        
+        // Wrap edges softly
+        const margin = 50;
+        if (this.x < -margin) this.x = W + margin;
+        if (this.x > W + margin) this.x = -margin;
+        if (this.y < -margin) this.y = H + margin;
+        if (this.y > H + margin) this.y = -margin;
+        break;
+        
+      case 'settling':
+        this.vx *= 0.96;
+        this.vy *= 0.96;
+        this.x += this.vx * dt * 0.06;
+        this.y += this.vy * dt * 0.06;
+        this.rootProgress += dt * 0.0003;
+        
+        // Mouse can uproot
+        if (mouseActive) {
+          const dx = this.x - mouseX;
+          const dy = this.y - mouseY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 100) {
+            this.state = 'drifting';
+            this.rootProgress = 0;
+            this.settleTimer = 0;
+            this.touched = true;
+            this.vx = (dx / dist) * 3;
+            this.vy = (dy / dist) * 3;
+          }
+        }
+        
+        if (this.rootProgress >= 1) {
+          this.state = 'rooted';
+        }
+        break;
+        
+      case 'rooted':
+        // Slowly bloom
+        this.bloomSize = Math.min(1, this.bloomSize + dt * 0.0001);
+        this.size = this.baseSize + this.bloomSize * 6;
+        
+        // Rooted grains pulse gently
+        this.alpha = this.targetAlpha * (0.7 + 0.3 * Math.sin(this.age * 0.001));
+        
+        // Mouse can still scatter
+        if (mouseActive) {
+          const dx = this.x - mouseX;
+          const dy = this.y - mouseY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 80) {
+            this.state = 'drifting';
+            this.rootProgress = 0;
+            this.bloomSize = 0;
+            this.size = this.baseSize;
+            this.touched = true;
+            this.willSettle = false; // once uprooted, doesn't settle again
+            this.vx = (dx / dist) * 4;
+            this.vy = (dy / dist) * 4;
+            
+            // Spawn a few child grains (pollen scattering)
+            return { spawn: 2 + Math.floor(Math.random() * 3), x: this.x, y: this.y };
+          }
+        }
+        break;
+    }
+    
+    // Apply lifecycle fade
+    if (lifecycleProgress > 0.7) {
+      this.alpha *= lifecycleFade;
+      if (this.alpha < 0.01) this.state = 'fading';
+    }
+    
+    return null;
+  }
+  
+  draw(ctx) {
+    if (this.alpha < 0.01) return;
+    
+    const colorBase = this.isFox ? FOX_ORANGE : this.color.slice(0, -2).replace('rgba', 'rgba');
+    
+    // Trail
+    if (this.state === 'drifting' && this.trail.length > 1) {
+      for (let i = 0; i < this.trail.length - 1; i++) {
+        const t = i / this.trail.length;
+        const trailAlpha = this.alpha * t * 0.3;
+        if (this.isFox) {
+          ctx.strokeStyle = FOX_ORANGE + trailAlpha + ')';
+        } else {
+          ctx.strokeStyle = this.color.replace(/[\d.]+\)$/, trailAlpha + ')');
+        }
+        ctx.lineWidth = this.size * t * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(this.trail[i].x, this.trail[i].y);
+        ctx.lineTo(this.trail[i + 1].x, this.trail[i + 1].y);
+        ctx.stroke();
+      }
+    }
+    
+    // Main body
+    ctx.beginPath();
+    
+    if (this.state === 'rooted' && this.bloomSize > 0.1) {
+      // Bloomed grains become soft rings
+      const innerR = this.baseSize;
+      const outerR = this.size;
+      
+      if (this.isFox) {
+        ctx.strokeStyle = FOX_ORANGE + (this.alpha * 0.6) + ')';
+        ctx.fillStyle = FOX_ORANGE + (this.alpha * 0.15) + ')';
+      } else {
+        ctx.strokeStyle = this.color.replace(/[\d.]+\)$/, (this.alpha * 0.6) + ')');
+        ctx.fillStyle = this.color.replace(/[\d.]+\)$/, (this.alpha * 0.15) + ')');
+      }
+      
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, outerR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+      
+      // Inner pip
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, innerR, 0, Math.PI * 2);
+      if (this.isFox) {
+        ctx.fillStyle = FOX_ORANGE + (this.alpha * 0.8) + ')';
+      } else {
+        ctx.fillStyle = this.color.replace(/[\d.]+\)$/, (this.alpha * 0.8) + ')');
+      }
+      ctx.fill();
+    } else if (this.state === 'settling') {
+      // Settling grains glow slightly
+      const glowR = this.size * (1 + this.rootProgress * 2);
+      if (this.isFox) {
+        ctx.fillStyle = FOX_ORANGE + (this.alpha * 0.05 * this.rootProgress) + ')';
+      } else {
+        ctx.fillStyle = this.color.replace(/[\d.]+\)$/, (this.alpha * 0.05 * this.rootProgress) + ')');
+      }
+      ctx.arc(this.x, this.y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+      if (this.isFox) {
+        ctx.fillStyle = FOX_ORANGE + this.alpha + ')';
+      } else {
+        ctx.fillStyle = this.color.replace(/[\d.]+\)$/, this.alpha + ')');
+      }
+      ctx.fill();
+    } else {
+      // Drifting — simple dot
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+      if (this.isFox) {
+        ctx.fillStyle = FOX_ORANGE + this.alpha + ')';
+      } else {
+        ctx.fillStyle = this.color.replace(/[\d.]+\)$/, this.alpha + ')');
+      }
+      ctx.fill();
+    }
+  }
+}
+
+// === WIND FIELD ===
+// Unique wind pattern from seed
+const WIND_OCTAVES = 3;
+const windOffsetX = srandom() * 1000;
+const windOffsetY = srandom() * 1000;
+
+// Simple noise approximation
+function noise2d(x, y) {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  
+  const n00 = Math.sin(ix * 127.1 + iy * 311.7) * 43758.5453;
+  const n01 = Math.sin(ix * 127.1 + (iy+1) * 311.7) * 43758.5453;
+  const n10 = Math.sin((ix+1) * 127.1 + iy * 311.7) * 43758.5453;
+  const n11 = Math.sin((ix+1) * 127.1 + (iy+1) * 311.7) * 43758.5453;
+  
+  const v00 = n00 - Math.floor(n00);
+  const v01 = n01 - Math.floor(n01);
+  const v10 = n10 - Math.floor(n10);
+  const v11 = n11 - Math.floor(n11);
+  
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  
+  return (v00 * (1-sx) + v10 * sx) * (1-sy) + (v01 * (1-sx) + v11 * sx) * sy;
+}
+
+function windAt(x, y, t) {
+  let wx = 0, wy = 0;
+  let amp = 1, freq = 0.003;
+  for (let i = 0; i < WIND_OCTAVES; i++) {
+    wx += (noise2d(x * freq + windOffsetX + t * 0.0001, y * freq) - 0.5) * amp;
+    wy += (noise2d(x * freq, y * freq + windOffsetY + t * 0.0001) - 0.5) * amp;
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return { wx, wy };
+}
+
+// === CONNECTIONS ===
+function drawConnections(ctx, grains) {
+  const maxDist = 80;
+  for (let i = 0; i < grains.length; i++) {
+    if (grains[i].alpha < 0.05) continue;
+    for (let j = i + 1; j < grains.length; j++) {
+      if (grains[j].alpha < 0.05) continue;
+      const dx = grains[i].x - grains[j].x;
+      const dy = grains[i].y - grains[j].y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < maxDist) {
+        const strength = (1 - dist / maxDist) * 0.12;
+        const alpha = strength * Math.min(grains[i].alpha, grains[j].alpha);
+        
+        // Connection color: blend of the two grains, or fox-orange if either is fox
+        if (grains[i].isFox || grains[j].isFox) {
+          ctx.strokeStyle = FOX_ORANGE + alpha + ')';
+        } else {
+          ctx.strokeStyle = `rgba(180, 160, 140, ${alpha})`;
+        }
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(grains[i].x, grains[i].y);
+        ctx.lineTo(grains[j].x, grains[j].y);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+// === STATE ===
+let grains = [];
+let started = false;
+let startTime = 0;
+let mouseX = 0, mouseY = 0, mouseActive = false;
+let lastTime = 0;
+let ended = false;
+
+// Initialize grains
+for (let i = 0; i < POLLEN_COUNT; i++) {
+  grains.push(new Grain());
+}
+
+// === INTERACTION ===
+document.getElementById('overlay').addEventListener('click', () => {
+  if (started) return;
+  started = true;
+  startTime = performance.now();
+  document.getElementById('overlay').classList.add('hidden');
+  
+  // Show seed briefly then fade
+  const seedFading = document.getElementById('seed-fading');
+  seedFading.textContent = `${SEED}`;
+  seedFading.style.opacity = '1';
+  setTimeout(() => { seedFading.style.opacity = '0'; }, 2000);
+  
+  // Show timer after 30s
+  setTimeout(() => {
+    document.getElementById('timer').style.opacity = '1';
+  }, 30000);
+  
+  requestAnimationFrame(animate);
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  mouseActive = true;
+});
+
+canvas.addEventListener('mouseleave', () => {
+  mouseActive = false;
+});
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  mouseX = e.touches[0].clientX;
+  mouseY = e.touches[0].clientY;
+  mouseActive = true;
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => {
+  mouseActive = false;
+});
+
+// === MESSAGES ===
+const MESSAGES = [
+  { time: 30000, text: "each grain was placed by the moment you arrived", duration: 6000 },
+  { time: 90000, text: "some will settle if you let them", duration: 5000 },
+  { time: 180000, text: "breathe near them and they scatter", duration: 5000 },
+  { time: (LIFECYCLE_MS * 0.7), text: "the garden is beginning to forget itself", duration: 7000 },
+  { time: (LIFECYCLE_MS * 0.9), text: "pollen, not echo", duration: 8000 },
+];
+let messageIndex = 0;
+
+function showMessage(text, duration) {
+  const el = document.getElementById('message');
+  el.textContent = text;
+  el.style.opacity = '0.7';
+  setTimeout(() => { el.style.opacity = '0'; }, duration);
+}
+
+// === ANIMATE ===
+function animate(now) {
+  if (!started) return;
+  
+  const dt = lastTime ? Math.min(now - lastTime, 50) : 16;
+  lastTime = now;
+  const elapsed = now - startTime;
+  
+  // Check messages
+  while (messageIndex < MESSAGES.length && elapsed >= MESSAGES[messageIndex].time) {
+    showMessage(MESSAGES[messageIndex].text, MESSAGES[messageIndex].duration);
+    messageIndex++;
+  }
+  
+  // Update timer
+  const remaining = Math.max(0, LIFECYCLE_MS - elapsed);
+  const mins = Math.floor(remaining / 60000);
+  const secs = Math.floor((remaining % 60000) / 1000);
+  document.getElementById('timer').textContent = 
+    `${mins}:${secs.toString().padStart(2, '0')}`;
+  
+  // Apply wind to drifting grains
+  const newGrains = [];
+  for (const grain of grains) {
+    if (grain.state === 'drifting') {
+      const wind = windAt(grain.x, grain.y, elapsed);
+      grain.vx += wind.wx * 0.02;
+      grain.vy += wind.wy * 0.02;
+    }
+    
+    const result = grain.update(dt, elapsed, mouseX, mouseY, mouseActive);
+    
+    // Handle spawn events from uprooted blooms
+    if (result && result.spawn) {
+      for (let i = 0; i < result.spawn; i++) {
+        const child = new Grain(
+          result.x + (Math.random() - 0.5) * 20,
+          result.y + (Math.random() - 0.5) * 20,
+          false
+        );
+        child.size = grain.baseSize * 0.6;
+        child.baseSize = child.size;
+        child.vx = (Math.random() - 0.5) * 3;
+        child.vy = (Math.random() - 0.5) * 3 - 1;
+        child.willSettle = false;
+        newGrains.push(child);
+      }
+    }
+  }
+  
+  // Add new grains
+  grains.push(...newGrains);
+  
+  // Remove dead grains
+  grains = grains.filter(g => g.state !== 'fading' && g.alpha > 0.005);
+  
+  // === DRAW ===
+  ctx.clearRect(0, 0, W, H);
+  
+  // Very subtle background gradient based on seed
+  const bgHue = BASE_HUE;
+  const grad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W, H) * 0.7);
+  grad.addColorStop(0, `hsla(${bgHue}, 10%, 5%, 0.3)`);
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Draw connections
+  drawConnections(ctx, grains);
+  
+  // Draw grains
+  for (const grain of grains) {
+    grain.draw(ctx);
+  }
+  
+  // End state
+  if (elapsed >= LIFECYCLE_MS && !ended) {
+    ended = true;
+    setTimeout(() => {
+      showMessage(`seed ${SEED} — gone`, 10000);
+      document.getElementById('timer').style.opacity = '0';
+    }, 2000);
+  }
+  
+  if (elapsed < LIFECYCLE_MS + 5000) {
+    requestAnimationFrame(animate);
+  }
+}
+</script>
+</body>
+</html>
