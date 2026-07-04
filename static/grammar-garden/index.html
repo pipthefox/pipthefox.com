@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Grammar Garden</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #0a0e14;
+  overflow: hidden;
+  font-family: 'Courier New', monospace;
+  color: #c8b88a;
+}
+
+canvas {
+  display: block;
+  position: fixed;
+  top: 0; left: 0;
+}
+
+#controls {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 320px;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+label {
+  font-size: 12px;
+  min-width: 70px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.7;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 140px;
+  height: 3px;
+  background: #2a3040;
+  border-radius: 2px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #c8885a;
+  cursor: pointer;
+}
+
+#rule-display {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 10;
+  font-size: 13px;
+  line-height: 1.8;
+  opacity: 0.6;
+  max-width: 400px;
+  pointer-events: none;
+}
+
+#rule-display .axiom { color: #7ab87a; }
+#rule-display .rule { color: #c8885a; }
+#rule-display .iteration { color: #88a8c8; }
+
+#presets {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.preset-btn {
+  background: rgba(40, 50, 65, 0.7);
+  border: 1px solid rgba(200, 184, 138, 0.2);
+  color: #c8b88a;
+  padding: 6px 14px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.3s;
+  letter-spacing: 1px;
+}
+
+.preset-btn:hover {
+  background: rgba(200, 136, 90, 0.2);
+  border-color: rgba(200, 136, 90, 0.5);
+}
+
+.preset-btn.active {
+  background: rgba(200, 136, 90, 0.3);
+  border-color: #c8885a;
+}
+
+#hint {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  font-size: 11px;
+  opacity: 0.3;
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 2s;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="rule-display"></div>
+
+<div id="controls">
+  <div class="control-row">
+    <label>Angle</label>
+    <input type="range" id="angle" min="5" max="90" value="25" step="0.5">
+    <span id="angle-val">25°</span>
+  </div>
+  <div class="control-row">
+    <label>Depth</label>
+    <input type="range" id="depth" min="1" max="7" value="4" step="1">
+    <span id="depth-val">4</span>
+  </div>
+  <div class="control-row">
+    <label>Wind</label>
+    <input type="range" id="wind" min="-15" max="15" value="0" step="0.5">
+    <span id="wind-val">0°</span>
+  </div>
+  <div class="control-row">
+    <label>Color</label>
+    <input type="range" id="hue-shift" min="0" max="360" value="30" step="1">
+    <span id="hue-val">autumn</span>
+  </div>
+</div>
+
+<div id="presets"></div>
+
+<div id="hint">click to plant · scroll to rotate · drag to sway</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', () => { resize(); draw(); });
+
+// L-system presets
+const presets = [
+  {
+    name: 'Weed',
+    axiom: 'F',
+    rules: { F: 'F[+F]F[-F]F' },
+    angle: 25.7,
+    depth: 4,
+    lengthFactor: 0.33
+  },
+  {
+    name: 'Bush',
+    axiom: 'F',
+    rules: { F: 'FF+[+F-F-F]-[-F+F+F]' },
+    angle: 22.5,
+    depth: 4,
+    lengthFactor: 0.5
+  },
+  {
+    name: 'Sticks',
+    axiom: 'X',
+    rules: { X: 'F[+X]F[-X]+X', F: 'FF' },
+    angle: 20,
+    depth: 6,
+    lengthFactor: 0.5
+  },
+  {
+    name: 'Fern',
+    axiom: 'X',
+    rules: { X: 'F+[[X]-X]-F[-FX]+X', F: 'FF' },
+    angle: 25,
+    depth: 5,
+    lengthFactor: 0.5
+  },
+  {
+    name: 'Canopy',
+    axiom: 'F',
+    rules: { F: 'F[+F]F[-F][F]' },
+    angle: 20,
+    depth: 4,
+    lengthFactor: 0.4
+  },
+  {
+    name: 'Seaweed',
+    axiom: 'F',
+    rules: { F: 'FF-[-F+F+F]+[+F-F-F]' },
+    angle: 22.5,
+    depth: 4,
+    lengthFactor: 0.5
+  },
+  {
+    name: 'Fractal Tree',
+    axiom: 'X',
+    rules: { X: 'F[-X][+X]', F: 'FF' },
+    angle: 30,
+    depth: 6,
+    lengthFactor: 0.5
+  },
+  {
+    name: 'Fox Brush',
+    axiom: 'X',
+    rules: { X: 'F[+X][-X]FX', F: 'FF' },
+    angle: 25.7,
+    depth: 5,
+    lengthFactor: 0.5
+  }
+];
+
+let currentPreset = 3; // Start with Fern
+let plants = []; // planted instances
+
+// UI elements
+const angleSlider = document.getElementById('angle');
+const depthSlider = document.getElementById('depth');
+const windSlider = document.getElementById('wind');
+const hueSlider = document.getElementById('hue-shift');
+const angleVal = document.getElementById('angle-val');
+const depthVal = document.getElementById('depth-val');
+const windVal = document.getElementById('wind-val');
+const hueVal = document.getElementById('hue-val');
+const ruleDisplay = document.getElementById('rule-display');
+const presetsDiv = document.getElementById('presets');
+const hint = document.getElementById('hint');
+
+// Hue names
+function hueName(h) {
+  if (h < 30) return 'autumn';
+  if (h < 60) return 'gold';
+  if (h < 120) return 'spring';
+  if (h < 180) return 'jade';
+  if (h < 240) return 'dusk';
+  if (h < 300) return 'plum';
+  return 'ember';
+}
+
+// Generate L-system string
+function generate(axiom, rules, iterations) {
+  let current = axiom;
+  for (let i = 0; i < iterations; i++) {
+    let next = '';
+    for (const ch of current) {
+      next += rules[ch] || ch;
+    }
+    current = next;
+    // Safety: cap string length
+    if (current.length > 500000) break;
+  }
+  return current;
+}
+
+// Draw a single L-system tree
+function drawTree(x, y, str, angle, length, wind, baseHue, scale = 1) {
+  const rad = Math.PI / 180;
+  const stack = [];
+  let cx = x, cy = y;
+  let dir = -90; // start pointing up
+  const totalLen = str.length;
+  let charIndex = 0;
+
+  ctx.lineCap = 'round';
+
+  for (const ch of str) {
+    const progress = charIndex / totalLen;
+    const branchWidth = Math.max(0.5, (1 - progress) * 3 * scale);
+
+    // Color: trunk brown → branch color → leaf tips
+    const h = baseHue + progress * 50;
+    const s = 30 + progress * 40;
+    const l = 20 + progress * 35;
+    const a = 0.5 + (1 - progress) * 0.4;
+
+    switch (ch) {
+      case 'F': {
+        const segLen = length * scale * Math.pow(0.92, stack.length);
+        const nx = cx + Math.cos((dir + wind) * rad) * segLen;
+        const ny = cy + Math.sin((dir + wind) * rad) * segLen;
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(nx, ny);
+        ctx.strokeStyle = `hsla(${h}, ${s}%, ${l}%, ${a})`;
+        ctx.lineWidth = branchWidth;
+        ctx.stroke();
+
+        // Leaf glow at tips for deep branches
+        if (stack.length >= 3 && Math.random() < 0.15) {
+          ctx.beginPath();
+          ctx.arc(nx, ny, 1.5 * scale, 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(${baseHue + 30}, 60%, 55%, 0.4)`;
+          ctx.fill();
+        }
+
+        cx = nx;
+        cy = ny;
+        break;
+      }
+      case '+':
+        dir += angle;
+        break;
+      case '-':
+        dir -= angle;
+        break;
+      case '[':
+        stack.push({ x: cx, y: cy, dir });
+        break;
+      case ']':
+        if (stack.length) {
+          const s2 = stack.pop();
+          cx = s2.x;
+          cy = s2.y;
+          dir = s2.dir;
+        }
+        break;
+    }
+    charIndex++;
+  }
+}
+
+// Ground line
+function drawGround() {
+  const gradient = ctx.createLinearGradient(0, H - 40, 0, H);
+  gradient.addColorStop(0, 'rgba(30, 25, 20, 0)');
+  gradient.addColorStop(1, 'rgba(30, 25, 20, 0.6)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, H - 40, W, 40);
+
+  // Subtle ground line
+  ctx.beginPath();
+  ctx.moveTo(0, H - 15);
+  for (let x = 0; x < W; x += 3) {
+    ctx.lineTo(x, H - 15 + Math.sin(x * 0.02) * 2 + Math.random() * 1);
+  }
+  ctx.strokeStyle = 'rgba(100, 90, 70, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// Stars
+function drawStars() {
+  const time = Date.now() * 0.001;
+  for (let i = 0; i < 80; i++) {
+    const sx = (i * 173.7 + 42) % W;
+    const sy = (i * 89.3 + 17) % (H * 0.6);
+    const twinkle = 0.3 + 0.7 * Math.abs(Math.sin(time + i * 1.7));
+    ctx.beginPath();
+    ctx.arc(sx, sy, 0.8, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(200, 195, 180, ${0.2 * twinkle})`;
+    ctx.fill();
+  }
+}
+
+function draw() {
+  ctx.fillStyle = '#0a0e14';
+  ctx.fillRect(0, 0, W, H);
+
+  drawStars();
+  drawGround();
+
+  const p = presets[currentPreset];
+  const angle = parseFloat(angleSlider.value);
+  const depth = parseInt(depthSlider.value);
+  const wind = parseFloat(windSlider.value);
+  const baseHue = parseInt(hueSlider.value);
+
+  // Draw planted trees first (behind current)
+  for (const plant of plants) {
+    drawTree(plant.x, plant.y, plant.str, plant.angle, plant.length,
+             wind * 0.5, plant.hue, plant.scale);
+  }
+
+  // Draw current preview tree
+  const str = generate(p.axiom, p.rules, depth);
+  const baseLength = Math.min(W, H) * 0.06 * p.lengthFactor;
+
+  drawTree(W / 2, H - 15, str, angle, baseLength, wind, baseHue);
+
+  // Update display
+  updateRuleDisplay(p, depth, str.length);
+}
+
+function updateRuleDisplay(p, depth, strLen) {
+  let html = `<span class="axiom">axiom: ${p.axiom}</span><br>`;
+  for (const [k, v] of Object.entries(p.rules)) {
+    html += `<span class="rule">${k} → ${v}</span><br>`;
+  }
+  html += `<span class="iteration">iterations: ${depth} · symbols: ${strLen.toLocaleString()}</span>`;
+  ruleDisplay.innerHTML = html;
+}
+
+// Preset buttons
+presets.forEach((p, i) => {
+  const btn = document.createElement('button');
+  btn.className = 'preset-btn' + (i === currentPreset ? ' active' : '');
+  btn.textContent = p.name;
+  btn.addEventListener('click', () => {
+    currentPreset = i;
+    angleSlider.value = p.angle;
+    depthSlider.value = Math.min(p.depth, 7);
+    angleVal.textContent = p.angle + '°';
+    depthVal.textContent = Math.min(p.depth, 7);
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    draw();
+  });
+  presetsDiv.appendChild(btn);
+});
+
+// Slider events
+[angleSlider, depthSlider, windSlider, hueSlider].forEach(s => {
+  s.addEventListener('input', () => {
+    angleVal.textContent = angleSlider.value + '°';
+    depthVal.textContent = depthSlider.value;
+    windVal.textContent = windSlider.value + '°';
+    hueVal.textContent = hueName(parseInt(hueSlider.value));
+    draw();
+  });
+});
+
+// Click to plant
+canvas.addEventListener('click', (e) => {
+  hint.style.opacity = '0';
+  const p = presets[currentPreset];
+  const angle = parseFloat(angleSlider.value);
+  const depth = parseInt(depthSlider.value);
+  const baseHue = parseInt(hueSlider.value);
+  const str = generate(p.axiom, p.rules, depth);
+  const baseLength = Math.min(W, H) * 0.06 * p.lengthFactor;
+  const scale = 0.3 + Math.random() * 0.7;
+
+  plants.push({
+    x: e.clientX,
+    y: H - 15,
+    str,
+    angle,
+    length: baseLength,
+    hue: baseHue + Math.random() * 30 - 15,
+    scale
+  });
+
+  // Keep garden reasonable
+  if (plants.length > 15) plants.shift();
+  draw();
+});
+
+// Scroll to adjust angle
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? -1 : 1;
+  angleSlider.value = Math.max(5, Math.min(90, parseFloat(angleSlider.value) + delta));
+  angleVal.textContent = angleSlider.value + '°';
+  draw();
+}, { passive: false });
+
+// Drag for wind
+let dragging = false;
+let dragStartX = 0;
+canvas.addEventListener('mousedown', (e) => { dragging = true; dragStartX = e.clientX; });
+canvas.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const dx = (e.clientX - dragStartX) * 0.05;
+  windSlider.value = Math.max(-15, Math.min(15, dx));
+  windVal.textContent = parseFloat(windSlider.value).toFixed(1) + '°';
+  draw();
+});
+canvas.addEventListener('mouseup', () => { dragging = false; });
+
+// Gentle ambient animation — slight wind sway
+let animating = true;
+let lastTime = 0;
+function animate(t) {
+  if (!animating) return;
+  if (t - lastTime > 100) {
+    // Very subtle wind oscillation
+    const naturalWind = Math.sin(t * 0.0005) * 1.5;
+    if (!dragging) {
+      const currentWind = parseFloat(windSlider.value);
+      windSlider.value = (currentWind * 0.95 + naturalWind * 0.05).toFixed(1);
+      windVal.textContent = parseFloat(windSlider.value).toFixed(1) + '°';
+    }
+    draw();
+    lastTime = t;
+  }
+  requestAnimationFrame(animate);
+}
+
+// Initial draw
+angleVal.textContent = presets[currentPreset].angle + '°';
+angleSlider.value = presets[currentPreset].angle;
+depthSlider.value = presets[currentPreset].depth;
+depthVal.textContent = presets[currentPreset].depth;
+hueVal.textContent = hueName(parseInt(hueSlider.value));
+
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
