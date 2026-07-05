@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fireflies</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0e14; overflow: hidden; font-family: Georgia, serif; }
+  canvas { display: block; }
+  
+  #controls {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    z-index: 10;
+    background: rgba(10, 14, 20, 0.7);
+    padding: 10px 20px;
+    border-radius: 20px;
+    backdrop-filter: blur(4px);
+  }
+  
+  #controls label {
+    color: rgba(180, 200, 160, 0.6);
+    font-size: 12px;
+    letter-spacing: 0.05em;
+  }
+  
+  #controls input[type="range"] {
+    -webkit-appearance: none;
+    width: 120px;
+    height: 3px;
+    background: rgba(180, 200, 160, 0.2);
+    border-radius: 2px;
+    outline: none;
+  }
+  
+  #controls input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(200, 230, 120, 0.6);
+    cursor: pointer;
+  }
+  
+  #info {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(180, 200, 160, 0.5);
+    font-size: 13px;
+    letter-spacing: 0.05em;
+    text-align: center;
+    z-index: 10;
+    pointer-events: none;
+    transition: opacity 2s;
+  }
+  
+  #sync-meter {
+    position: fixed;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 200px;
+    background: rgba(180, 200, 160, 0.1);
+    border-radius: 2px;
+    z-index: 10;
+  }
+  
+  #sync-fill {
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    background: rgba(200, 230, 120, 0.5);
+    border-radius: 2px;
+    transition: height 0.3s;
+  }
+  
+  #sync-label {
+    position: fixed;
+    right: 12px;
+    top: calc(50% + 110px);
+    color: rgba(180, 200, 160, 0.4);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    writing-mode: vertical-rl;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="info">click to add fireflies · they'll find each other</div>
+
+<div id="sync-meter">
+  <div id="sync-fill"></div>
+</div>
+<div id="sync-label">synchrony</div>
+
+<div id="controls">
+  <label>coupling
+    <input type="range" id="coupling" min="0" max="100" value="30">
+  </label>
+  <label>count
+    <input type="range" id="count" min="5" max="200" value="40">
+  </label>
+  <label>scatter
+    <button id="scatter" style="background:none;border:1px solid rgba(180,200,160,0.3);color:rgba(180,200,160,0.6);padding:3px 10px;border-radius:10px;cursor:pointer;font-size:11px;">reset phases</button>
+  </label>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const syncFill = document.getElementById('sync-fill');
+const info = document.getElementById('info');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Kuramoto model parameters
+const TWO_PI = Math.PI * 2;
+
+class Firefly {
+  constructor(x, y) {
+    this.x = x || Math.random() * W;
+    this.y = y || Math.random() * H;
+    // Natural frequency: each firefly has its own rhythm
+    // Real fireflies flash roughly every 1-2 seconds
+    this.naturalFreq = 1.5 + (Math.random() - 0.5) * 0.8; // Hz
+    this.phase = Math.random() * TWO_PI;
+    // Drift (gentle wandering)
+    this.vx = (Math.random() - 0.5) * 0.3;
+    this.vy = (Math.random() - 0.5) * 0.3;
+    // Visual
+    this.hue = 55 + Math.random() * 30; // warm yellow-green
+    this.size = 2 + Math.random() * 2;
+    // Trail
+    this.trail = [];
+  }
+  
+  brightness() {
+    // Flash near phase = 0, using a narrow pulse
+    const p = ((this.phase % TWO_PI) + TWO_PI) % TWO_PI;
+    // Gaussian-ish pulse centered at 0
+    if (p < Math.PI) {
+      return Math.exp(-p * p * 3);
+    } else {
+      const q = TWO_PI - p;
+      return Math.exp(-q * q * 3);
+    }
+  }
+  
+  update(dt, fireflies, coupling) {
+    // Kuramoto coupling: adjust phase toward the mean
+    if (coupling > 0 && fireflies.length > 1) {
+      let sinSum = 0, cosSum = 0;
+      const cx = this.x, cy = this.y;
+      
+      for (const other of fireflies) {
+        if (other === this) continue;
+        // Distance-based coupling (nearby fireflies influence more)
+        const dx = other.x - cx;
+        const dy = other.y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const influence = Math.exp(-dist / 200); // coupling radius
+        sinSum += influence * Math.sin(other.phase - this.phase);
+        cosSum += influence * Math.cos(other.phase - this.phase);
+      }
+      
+      // Phase adjustment
+      const K = coupling * 0.05; // coupling strength
+      this.phase += dt * (this.naturalFreq * TWO_PI + K * sinSum);
+    } else {
+      this.phase += dt * this.naturalFreq * TWO_PI;
+    }
+    
+    // Normalize phase
+    this.phase = ((this.phase % TWO_PI) + TWO_PI) % TWO_PI;
+    
+    // Gentle drift
+    this.x += this.vx;
+    this.y += this.vy;
+    
+    // Soft boundary wrapping with some randomness
+    const margin = 50;
+    if (this.x < -margin) this.x = W + margin;
+    if (this.x > W + margin) this.x = -margin;
+    if (this.y < -margin) this.y = H + margin;
+    if (this.y > H + margin) this.y = -margin;
+    
+    // Occasional direction change
+    if (Math.random() < 0.01) {
+      this.vx += (Math.random() - 0.5) * 0.2;
+      this.vy += (Math.random() - 0.5) * 0.2;
+      const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+      if (speed > 0.5) {
+        this.vx *= 0.5 / speed;
+        this.vy *= 0.5 / speed;
+      }
+    }
+    
+    // Trail
+    const b = this.brightness();
+    if (b > 0.1) {
+      this.trail.push({ x: this.x, y: this.y, b, age: 0 });
+    }
+    this.trail = this.trail.filter(t => {
+      t.age += dt;
+      return t.age < 0.8;
+    });
+  }
+  
+  draw(ctx) {
+    const b = this.brightness();
+    
+    // Draw trail
+    for (const t of this.trail) {
+      const alpha = t.b * 0.15 * (1 - t.age / 0.8);
+      if (alpha > 0.01) {
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, this.size * 0.8, 0, TWO_PI);
+        ctx.fillStyle = `hsla(${this.hue}, 80%, 70%, ${alpha})`;
+        ctx.fill();
+      }
+    }
+    
+    if (b > 0.02) {
+      // Outer glow
+      const glowRadius = this.size * (3 + b * 12);
+      const grad = ctx.createRadialGradient(
+        this.x, this.y, 0,
+        this.x, this.y, glowRadius
+      );
+      grad.addColorStop(0, `hsla(${this.hue}, 90%, 85%, ${b * 0.5})`);
+      grad.addColorStop(0.3, `hsla(${this.hue}, 80%, 65%, ${b * 0.2})`);
+      grad.addColorStop(1, `hsla(${this.hue}, 70%, 50%, 0)`);
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, glowRadius, 0, TWO_PI);
+      ctx.fillStyle = grad;
+      ctx.fill();
+      
+      // Core
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size * (0.5 + b * 0.5), 0, TWO_PI);
+      ctx.fillStyle = `hsla(${this.hue}, 60%, 90%, ${b * 0.8})`;
+      ctx.fill();
+    } else {
+      // Dim body always slightly visible
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size * 0.3, 0, TWO_PI);
+      ctx.fillStyle = `hsla(${this.hue}, 30%, 40%, 0.08)`;
+      ctx.fill();
+    }
+  }
+}
+
+// Stars (background)
+const stars = [];
+for (let i = 0; i < 150; i++) {
+  stars.push({
+    x: Math.random() * 3000,
+    y: Math.random() * 2000,
+    size: Math.random() * 1.5,
+    twinkle: Math.random() * TWO_PI,
+    rate: 0.5 + Math.random() * 2
+  });
+}
+
+// Ground (gentle rolling hills)
+function groundHeight(x) {
+  return H - 60 
+    - Math.sin(x * 0.003) * 20 
+    - Math.sin(x * 0.007 + 1) * 10
+    - Math.sin(x * 0.001 + 2) * 30;
+}
+
+// Trees (silhouettes)
+const trees = [];
+for (let i = 0; i < 12; i++) {
+  const tx = (W / 12) * i + Math.random() * (W / 12);
+  trees.push({
+    x: tx,
+    height: 60 + Math.random() * 80,
+    width: 20 + Math.random() * 30,
+    type: Math.random() > 0.5 ? 'pine' : 'oak'
+  });
+}
+
+// Initialize fireflies
+let fireflies = [];
+function initFireflies(n) {
+  fireflies = [];
+  for (let i = 0; i < n; i++) {
+    const x = Math.random() * W;
+    const y = groundHeight(x) - 30 - Math.random() * (H * 0.5);
+    fireflies.push(new Firefly(x, y));
+  }
+}
+initFireflies(40);
+
+// Order parameter (synchronization measure)
+function orderParameter() {
+  if (fireflies.length < 2) return 0;
+  let sinSum = 0, cosSum = 0;
+  for (const f of fireflies) {
+    sinSum += Math.sin(f.phase);
+    cosSum += Math.cos(f.phase);
+  }
+  const n = fireflies.length;
+  return Math.sqrt(sinSum * sinSum + cosSum * cosSum) / n;
+}
+
+// Controls
+const couplingSlider = document.getElementById('coupling');
+const countSlider = document.getElementById('count');
+const scatterBtn = document.getElementById('scatter');
+
+countSlider.addEventListener('input', () => {
+  const target = parseInt(countSlider.value);
+  while (fireflies.length < target) {
+    const x = Math.random() * W;
+    const y = groundHeight(x) - 30 - Math.random() * (H * 0.5);
+    fireflies.push(new Firefly(x, y));
+  }
+  while (fireflies.length > target) {
+    fireflies.pop();
+  }
+});
+
+scatterBtn.addEventListener('click', () => {
+  for (const f of fireflies) {
+    f.phase = Math.random() * TWO_PI;
+  }
+});
+
+canvas.addEventListener('click', (e) => {
+  // Add a cluster of fireflies at click location
+  for (let i = 0; i < 5; i++) {
+    const x = e.clientX + (Math.random() - 0.5) * 60;
+    const y = e.clientY + (Math.random() - 0.5) * 60;
+    fireflies.push(new Firefly(x, y));
+  }
+  countSlider.value = Math.min(200, fireflies.length);
+  
+  // Fade info text
+  info.style.opacity = '0';
+});
+
+// Draw scene
+function drawBackground(time) {
+  // Night sky gradient
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+  skyGrad.addColorStop(0, '#0a0e14');
+  skyGrad.addColorStop(0.6, '#111820');
+  skyGrad.addColorStop(1, '#1a2030');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Stars
+  for (const s of stars) {
+    const twinkle = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(time * s.rate + s.twinkle));
+    ctx.beginPath();
+    ctx.arc(s.x % W, s.y % H, s.size * twinkle, 0, TWO_PI);
+    ctx.fillStyle = `rgba(200, 210, 230, ${0.3 * twinkle})`;
+    ctx.fill();
+  }
+  
+  // Trees (silhouettes)
+  ctx.fillStyle = '#0d1218';
+  for (const t of trees) {
+    const base = groundHeight(t.x);
+    if (t.type === 'pine') {
+      // Triangle pine
+      ctx.beginPath();
+      ctx.moveTo(t.x, base - t.height);
+      ctx.lineTo(t.x - t.width, base);
+      ctx.lineTo(t.x + t.width, base);
+      ctx.closePath();
+      ctx.fill();
+      // Trunk
+      ctx.fillRect(t.x - 3, base - 10, 6, 10);
+    } else {
+      // Round oak
+      ctx.beginPath();
+      ctx.ellipse(t.x, base - t.height * 0.6, t.width, t.height * 0.5, 0, 0, TWO_PI);
+      ctx.fill();
+      ctx.fillRect(t.x - 4, base - t.height * 0.3, 8, t.height * 0.3);
+    }
+  }
+  
+  // Ground
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 5) {
+    ctx.lineTo(x, groundHeight(x));
+  }
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  
+  const groundGrad = ctx.createLinearGradient(0, H - 100, 0, H);
+  groundGrad.addColorStop(0, '#0f1a10');
+  groundGrad.addColorStop(1, '#0a120a');
+  ctx.fillStyle = groundGrad;
+  ctx.fill();
+}
+
+let lastTime = performance.now();
+
+function animate(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+  
+  const coupling = parseFloat(couplingSlider.value);
+  
+  drawBackground(now / 1000);
+  
+  // Update and draw fireflies
+  for (const f of fireflies) {
+    f.update(dt, fireflies, coupling);
+  }
+  for (const f of fireflies) {
+    f.draw(ctx);
+  }
+  
+  // Update sync meter
+  const r = orderParameter();
+  syncFill.style.height = (r * 100) + '%';
+  syncFill.style.background = `hsla(${70 + r * 30}, ${60 + r * 30}%, ${50 + r * 20}%, ${0.3 + r * 0.4})`;
+  
+  requestAnimationFrame(animate);
+}
+
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
