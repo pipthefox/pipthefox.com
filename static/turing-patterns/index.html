@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Turing Patterns</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #c8b89a;
+    font-family: 'Georgia', serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 2rem 1rem;
+  }
+  h1 {
+    font-size: 1.4rem;
+    font-weight: normal;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.5rem;
+    color: #e8d8b8;
+  }
+  .subtitle {
+    font-size: 0.85rem;
+    color: #887860;
+    margin-bottom: 1.5rem;
+    font-style: italic;
+  }
+  canvas {
+    border: 1px solid #2a2520;
+    cursor: crosshair;
+    image-rendering: pixelated;
+    max-width: 100%;
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2rem;
+    margin-top: 1.5rem;
+    justify-content: center;
+    max-width: 700px;
+  }
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .control-group label {
+    font-size: 0.75rem;
+    color: #887860;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .control-group input[type="range"] {
+    width: 120px;
+    accent-color: #c8b89a;
+  }
+  .control-group .value {
+    font-size: 0.7rem;
+    color: #665840;
+    font-family: monospace;
+  }
+  .presets {
+    display: flex;
+    gap: 0.6rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  button {
+    background: #1a1510;
+    border: 1px solid #3a3020;
+    color: #c8b89a;
+    padding: 0.4rem 0.9rem;
+    font-family: 'Georgia', serif;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  button:hover {
+    background: #2a2015;
+    border-color: #5a4830;
+  }
+  button.active {
+    background: #2a2015;
+    border-color: #c8b89a;
+  }
+  .hint {
+    font-size: 0.75rem;
+    color: #554830;
+    margin-top: 1rem;
+    text-align: center;
+    font-style: italic;
+  }
+  .fps {
+    position: fixed;
+    top: 0.5rem;
+    right: 0.5rem;
+    font-size: 0.65rem;
+    color: #443820;
+    font-family: monospace;
+  }
+</style>
+</head>
+<body>
+
+<h1>Turing Patterns</h1>
+<p class="subtitle">reaction–diffusion on a quiet grid</p>
+
+<canvas id="canvas" width="256" height="256"></canvas>
+
+<div class="controls">
+  <div class="control-group">
+    <label>Feed (f)</label>
+    <input type="range" id="feed" min="0.01" max="0.08" step="0.001" value="0.055">
+    <span class="value" id="feedVal">0.055</span>
+  </div>
+  <div class="control-group">
+    <label>Kill (k)</label>
+    <input type="range" id="kill" min="0.04" max="0.075" step="0.001" value="0.062">
+    <span class="value" id="killVal">0.062</span>
+  </div>
+  <div class="control-group">
+    <label>Diffusion U</label>
+    <input type="range" id="du" min="0.1" max="0.3" step="0.01" value="0.21">
+    <span class="value" id="duVal">0.21</span>
+  </div>
+  <div class="control-group">
+    <label>Diffusion V</label>
+    <input type="range" id="dv" min="0.02" max="0.15" step="0.005" value="0.105">
+    <span class="value" id="dvVal">0.105</span>
+  </div>
+  <div class="control-group">
+    <label>Speed</label>
+    <input type="range" id="speed" min="1" max="20" step="1" value="8">
+    <span class="value" id="speedVal">8</span>
+  </div>
+</div>
+
+<div class="presets">
+  <button onclick="setPreset('coral')" id="btn-coral" class="active">Coral</button>
+  <button onclick="setPreset('mitosis')" id="btn-mitosis">Mitosis</button>
+  <button onclick="setPreset('maze')" id="btn-maze">Maze</button>
+  <button onclick="setPreset('spots')" id="btn-spots">Spots</button>
+  <button onclick="setPreset('worms')" id="btn-worms">Worms</button>
+  <button onclick="setPreset('waves')" id="btn-waves">Waves</button>
+  <button onclick="clearGrid()" id="btn-clear">Clear</button>
+  <button onclick="reseed()">Reseed</button>
+</div>
+
+<div class="presets" style="margin-top: 0.8rem;">
+  <button onclick="setPalette('ember')" id="pal-ember" class="active" style="font-size:0.7rem">Ember</button>
+  <button onclick="setPalette('ocean')" id="pal-ocean" style="font-size:0.7rem">Ocean</button>
+  <button onclick="setPalette('lichen')" id="pal-lichen" style="font-size:0.7rem">Lichen</button>
+  <button onclick="setPalette('bone')" id="pal-bone" style="font-size:0.7rem">Bone</button>
+</div>
+
+<p class="hint">Click and drag to seed chemical V. Presets change the feed/kill rates.</p>
+
+<div class="fps" id="fps"></div>
+
+<script>
+const W = 256, H = 256;
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// Display at 2x
+canvas.style.width = '512px';
+canvas.style.height = '512px';
+
+// Two grids, double-buffered
+let u = new Float32Array(W * H);
+let v = new Float32Array(W * H);
+let u2 = new Float32Array(W * H);
+let v2 = new Float32Array(W * H);
+
+const imageData = ctx.createImageData(W, H);
+
+// Parameters
+let feed = 0.055, kill = 0.062, Du = 0.21, Dv = 0.105, stepsPerFrame = 8;
+
+const presets = {
+  coral:   { f: 0.055, k: 0.062 },
+  mitosis: { f: 0.037, k: 0.06 },
+  maze:    { f: 0.029, k: 0.057 },
+  spots:   { f: 0.03,  k: 0.062 },
+  worms:   { f: 0.078, k: 0.061 },
+  waves:   { f: 0.014, k: 0.045 },
+};
+
+// Color palettes
+const palettes = {
+  ember: (t) => {
+    if (t < 0.3) return [10 + t*100|0, 8 + t*40|0, 12 + t*20|0];
+    if (t < 0.7) { const s=(t-0.3)/0.4; return [40+s*160|0, 20+s*80|0, 18+s*30|0]; }
+    const s=(t-0.7)/0.3; return [200+s*55|0, 100+s*85|0, 48+s*110|0];
+  },
+  ocean: (t) => {
+    if (t < 0.3) return [8+t*20|0, 12+t*50|0, 20+t*80|0];
+    if (t < 0.7) { const s=(t-0.3)/0.4; return [14+s*40|0, 27+s*100|0, 44+s*140|0]; }
+    const s=(t-0.7)/0.3; return [54+s*120|0, 127+s*90|0, 184+s*60|0];
+  },
+  lichen: (t) => {
+    if (t < 0.3) return [10+t*30|0, 14+t*60|0, 10+t*20|0];
+    if (t < 0.7) { const s=(t-0.3)/0.4; return [19+s*60|0, 32+s*130|0, 16+s*50|0]; }
+    const s=(t-0.7)/0.3; return [79+s*100|0, 162+s*80|0, 66+s*100|0];
+  },
+  bone: (t) => {
+    if (t < 0.3) return [12+t*40|0, 10+t*35|0, 10+t*30|0];
+    if (t < 0.7) { const s=(t-0.3)/0.4; return [24+s*120|0, 20+s*110|0, 19+s*100|0]; }
+    const s=(t-0.7)/0.3; return [144+s*90|0, 130+s*95|0, 119+s*100|0];
+  },
+};
+let currentPalette = 'ember';
+
+function getColor(val) {
+  const t = Math.min(1, Math.max(0, val * 3));
+  return palettes[currentPalette](t);
+}
+
+function init() {
+  u.fill(1);
+  v.fill(0);
+  // Seed with several random clusters
+  const nSeeds = 3 + Math.floor(Math.random() * 4);
+  for (let s = 0; s < nSeeds; s++) {
+    const cx = 30 + Math.random() * (W - 60) | 0;
+    const cy = 30 + Math.random() * (H - 60) | 0;
+    const r = 4 + Math.random() * 8 | 0;
+    seedAt(cx, cy, r);
+  }
+}
+
+function seedAt(cx, cy, r) {
+  for (let y = cy - r; y <= cy + r; y++) {
+    for (let x = cx - r; x <= cx + r; x++) {
+      const wx = ((x % W) + W) % W;
+      const wy = ((y % H) + H) % H;
+      const i = wy * W + wx;
+      u[i] = 0.5 + Math.random() * 0.1;
+      v[i] = 0.25 + Math.random() * 0.1;
+    }
+  }
+}
+
+function clearGrid() {
+  u.fill(1);
+  v.fill(0);
+  seedAt(W / 2, H / 2, 8);
+}
+
+function reseed() {
+  init();
+}
+
+function step() {
+  const f = feed, k = kill, dU = Du, dV = Dv;
+  
+  for (let y = 0; y < H; y++) {
+    const ym = ((y - 1 + H) % H) * W;
+    const yc = y * W;
+    const yp = ((y + 1) % H) * W;
+    
+    for (let x = 0; x < W; x++) {
+      const xm = (x - 1 + W) % W;
+      const xp = (x + 1) % W;
+      const i = yc + x;
+      
+      const uVal = u[i];
+      const vVal = v[i];
+      
+      // Laplacian with 5-point stencil
+      const lapU = u[ym + x] + u[yp + x] + u[yc + xm] + u[yc + xp] - 4 * uVal;
+      const lapV = v[ym + x] + v[yp + x] + v[yc + xm] + v[yc + xp] - 4 * vVal;
+      
+      const uvv = uVal * vVal * vVal;
+      
+      u2[i] = uVal + dU * lapU - uvv + f * (1 - uVal);
+      v2[i] = vVal + dV * lapV + uvv - (f + k) * vVal;
+    }
+  }
+  
+  // Swap buffers
+  [u, u2] = [u2, u];
+  [v, v2] = [v2, v];
+}
+
+function render() {
+  const data = imageData.data;
+  for (let i = 0; i < W * H; i++) {
+    const [r, g, b] = getColor(v[i]);
+    const j = i * 4;
+    data[j] = r;
+    data[j + 1] = g;
+    data[j + 2] = b;
+    data[j + 3] = 255;
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+function setPreset(name) {
+  const p = presets[name];
+  if (!p) return;
+  feed = p.f;
+  kill = p.k;
+  document.getElementById('feed').value = feed;
+  document.getElementById('kill').value = kill;
+  document.getElementById('feedVal').textContent = feed.toFixed(3);
+  document.getElementById('killVal').textContent = kill.toFixed(3);
+  
+  document.querySelectorAll('.presets button').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-' + name).classList.add('active');
+  
+  // Reset grid for new preset
+  clearGrid();
+  document.getElementById('btn-' + name).classList.add('active');
+}
+
+function setPalette(name) {
+  currentPalette = name;
+  document.querySelectorAll('[id^="pal-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('pal-' + name).classList.add('active');
+}
+
+// Slider bindings
+['feed', 'kill', 'du', 'dv', 'speed'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    const val = parseFloat(el.value);
+    document.getElementById(id + 'Val').textContent = val.toFixed(id === 'speed' ? 0 : 3);
+    if (id === 'feed') feed = val;
+    else if (id === 'kill') kill = val;
+    else if (id === 'du') Du = val;
+    else if (id === 'dv') Dv = val;
+    else if (id === 'speed') stepsPerFrame = val;
+    
+    // Remove preset active state when manually adjusting f/k
+    if (id === 'feed' || id === 'kill') {
+      document.querySelectorAll('.presets button').forEach(b => b.classList.remove('active'));
+    }
+  });
+});
+
+// Mouse interaction
+let mouseDown = false;
+canvas.addEventListener('mousedown', (e) => { mouseDown = true; paint(e); });
+canvas.addEventListener('mousemove', (e) => { if (mouseDown) paint(e); });
+canvas.addEventListener('mouseup', () => { mouseDown = false; });
+canvas.addEventListener('mouseleave', () => { mouseDown = false; });
+
+// Touch support
+canvas.addEventListener('touchstart', (e) => { e.preventDefault(); mouseDown = true; paintTouch(e); });
+canvas.addEventListener('touchmove', (e) => { e.preventDefault(); if (mouseDown) paintTouch(e); });
+canvas.addEventListener('touchend', () => { mouseDown = false; });
+
+function paint(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  const x = (e.clientX - rect.left) * scaleX | 0;
+  const y = (e.clientY - rect.top) * scaleY | 0;
+  seedAt(x, y, 3);
+}
+
+function paintTouch(e) {
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  const x = (touch.clientX - rect.left) * scaleX | 0;
+  const y = (touch.clientY - rect.top) * scaleY | 0;
+  seedAt(x, y, 3);
+}
+
+// FPS counter
+let frameCount = 0, lastFpsTime = performance.now();
+
+function loop() {
+  for (let i = 0; i < stepsPerFrame; i++) step();
+  render();
+  
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsTime > 1000) {
+    document.getElementById('fps').textContent = frameCount + ' fps';
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+  
+  requestAnimationFrame(loop);
+}
+
+init();
+loop();
+</script>
+
+</body>
+</html>
