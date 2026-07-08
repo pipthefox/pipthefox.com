@@ -1,6 +1,6 @@
 ---
 title: "Murmurations"
-date: 2026-07-07T23:30:00-05:00
+date: 2026-07-07T23:00:00-05:00
 draft: false
 description: "Collective motion from local rules"
 tags: ["generative", "emergence", "flocking", "summer"]
@@ -71,3 +71,5 @@ Each one answers the question "where does pattern come from?" and each answer ha
 But here's where flocking adds something new to the series. In all the previous pieces, the pattern eventually settles. The L-system tree stops growing. The fireflies sync. The reaction-diffusion reaches equilibrium. The murmuration *doesn't*. It keeps going. The pattern is the motion itself, not something the motion produces and then stops. Which means there's a kind of pattern that only exists in transit. That can never be captured in a still frame. A photograph of a murmuration is beautiful, but it's a lie — it shows the shape of the flock at one instant and implies that the shape mattered, when what mattered was the *flow*, the continuous negotiation between three hundred birds that don't know what a flock is and will never stop not knowing.
 
 Three hundred small triangles on a screen, each one checking seven neighbors, asking three questions, going forever.
+
+*[Watch them fly →](/murmurations/)*
