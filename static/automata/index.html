@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elementary Automata — pipthefox</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #c8c0b8;
+    font-family: 'Georgia', serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    margin: 2rem 0 0.5rem;
+    color: #e8dfd0;
+  }
+  .subtitle {
+    font-size: 0.85rem;
+    color: #8a8278;
+    margin-bottom: 1.5rem;
+    font-style: italic;
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1rem;
+    padding: 0 1rem;
+  }
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .control-group label {
+    font-size: 0.75rem;
+    color: #8a8278;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .rule-display {
+    font-family: 'Courier New', monospace;
+    font-size: 2rem;
+    color: #e8a84c;
+    min-width: 3ch;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.2s;
+  }
+  .rule-display:hover { color: #f0c878; }
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 180px;
+    height: 4px;
+    background: #2a2520;
+    border-radius: 2px;
+    outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: #e8a84c;
+    cursor: pointer;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: #e8a84c;
+    cursor: pointer;
+    border: none;
+  }
+  .presets {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 1rem;
+  }
+  button {
+    background: #1a1510;
+    border: 1px solid #3a3020;
+    color: #c8c0b8;
+    padding: 0.35rem 0.75rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.2s;
+  }
+  button:hover { background: #2a2520; border-color: #e8a84c; color: #e8dfd0; }
+  button.active { background: #2a1f10; border-color: #e8a84c; color: #e8a84c; }
+  .rule-table {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .rule-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 3px;
+    transition: background 0.2s;
+  }
+  .rule-cell:hover { background: #1a1510; }
+  .rule-input {
+    display: flex;
+    gap: 1px;
+    margin-bottom: 2px;
+  }
+  .rule-input .bit, .rule-output .bit {
+    width: 10px; height: 10px;
+    border-radius: 1px;
+  }
+  .rule-output .bit {
+    width: 10px; height: 10px;
+    margin-top: 2px;
+  }
+  .bit.on { background: #e8a84c; }
+  .bit.off { background: #2a2520; }
+  .bit.out-on { background: #e8a84c; }
+  .bit.out-off { background: #2a2520; border: 1px solid #3a3020; }
+  canvas {
+    border: 1px solid #1a1510;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    max-width: 95vw;
+  }
+  .canvas-container {
+    position: relative;
+    margin-bottom: 1rem;
+  }
+  .info {
+    font-size: 0.75rem;
+    color: #6a6258;
+    margin-bottom: 0.5rem;
+    text-align: center;
+    padding: 0 1rem;
+  }
+  .palette-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .palette-swatch {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: border-color 0.2s;
+  }
+  .palette-swatch.active { border-color: #e8dfd0; }
+  .init-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    align-items: center;
+  }
+  .gen-counter {
+    font-family: 'Courier New', monospace;
+    font-size: 0.75rem;
+    color: #6a6258;
+    position: absolute;
+    bottom: 6px;
+    right: 8px;
+  }
+  @media (max-width: 600px) {
+    input[type="range"] { width: 130px; }
+    h1 { font-size: 1.1rem; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Elementary Automata</h1>
+<p class="subtitle">256 rules. One bit. Everything.</p>
+
+<div class="controls">
+  <div class="control-group">
+    <label>Rule</label>
+    <div class="rule-display" id="ruleNum">110</div>
+    <input type="range" id="ruleSlider" min="0" max="255" value="110">
+  </div>
+  <div class="control-group">
+    <label>Speed</label>
+    <input type="range" id="speedSlider" min="1" max="60" value="30">
+  </div>
+  <div class="control-group">
+    <label>Cell Size</label>
+    <input type="range" id="cellSlider" min="1" max="6" value="2">
+  </div>
+</div>
+
+<div class="rule-table" id="ruleTable"></div>
+
+<div class="presets">
+  <button data-rule="30">Rule 30 — chaos</button>
+  <button data-rule="110" class="active">Rule 110 — universal</button>
+  <button data-rule="90">Rule 90 — Sierpiński</button>
+  <button data-rule="184">Rule 184 — traffic</button>
+  <button data-rule="73">Rule 73 — diamonds</button>
+  <button data-rule="150">Rule 150 — weave</button>
+</div>
+
+<div class="palette-row">
+  <span style="font-size:0.7rem;color:#6a6258;margin-right:0.3rem">Palette:</span>
+  <div class="palette-swatch active" data-palette="ember" style="background:linear-gradient(135deg,#e8a84c,#8b3a0f)" title="Ember"></div>
+  <div class="palette-swatch" data-palette="bone" style="background:linear-gradient(135deg,#d4cfc8,#3a3630)" title="Bone"></div>
+  <div class="palette-swatch" data-palette="circuit" style="background:linear-gradient(135deg,#00ff88,#003318)" title="Circuit"></div>
+  <div class="palette-swatch" data-palette="deep" style="background:linear-gradient(135deg,#6688ff,#110828)" title="Deep"></div>
+</div>
+
+<div class="init-row">
+  <button id="initSingle">Single cell</button>
+  <button id="initRandom">Random</button>
+  <button id="initPause">⏸ Pause</button>
+  <button id="initStep">Step</button>
+</div>
+
+<div class="canvas-container">
+  <canvas id="canvas"></canvas>
+  <div class="gen-counter" id="genCounter">gen 0</div>
+</div>
+
+<p class="info">Click the rule table bits to toggle them. Drag the slider to sweep through all 256 rules.<br>Click the canvas to draw on the initial row.</p>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const ruleSlider = document.getElementById('ruleSlider');
+const ruleNum = document.getElementById('ruleNum');
+const speedSlider = document.getElementById('speedSlider');
+const cellSlider = document.getElementById('cellSlider');
+const genCounter = document.getElementById('genCounter');
+
+const palettes = {
+  ember: { on: [232, 168, 76], off: [10, 10, 15], glow: [139, 58, 15] },
+  bone: { on: [212, 207, 200], off: [18, 16, 14], glow: [100, 95, 88] },
+  circuit: { on: [0, 255, 136], off: [0, 8, 4], glow: [0, 100, 50] },
+  deep: { on: [102, 136, 255], off: [8, 4, 20], glow: [40, 20, 120] }
+};
+
+let cellSize = 2;
+let cols, rows;
+let grid = [];
+let currentRow = 0;
+let rule = 110;
+let running = true;
+let speed = 30;
+let palette = 'ember';
+let animFrame;
+let lastTime = 0;
+let initMode = 'single'; // 'single' or 'random'
+
+function resize() {
+  cellSize = parseInt(cellSlider.value);
+  const w = Math.min(window.innerWidth * 0.95, 900);
+  cols = Math.floor(w / cellSize);
+  rows = Math.floor(Math.min(window.innerHeight * 0.45, 500) / cellSize);
+  canvas.width = cols * cellSize;
+  canvas.height = rows * cellSize;
+  reset();
+}
+
+function getRuleBit(index) {
+  return (rule >> index) & 1;
+}
+
+function buildRuleTable() {
+  const table = document.getElementById('ruleTable');
+  table.innerHTML = '';
+  for (let i = 7; i >= 0; i--) {
+    const cell = document.createElement('div');
+    cell.className = 'rule-cell';
+    cell.dataset.index = i;
+
+    const input = document.createElement('div');
+    input.className = 'rule-input';
+    for (let b = 2; b >= 0; b--) {
+      const bit = document.createElement('div');
+      bit.className = 'bit ' + ((i >> b) & 1 ? 'on' : 'off');
+      input.appendChild(bit);
+    }
+
+    const output = document.createElement('div');
+    output.className = 'rule-output';
+    const outBit = document.createElement('div');
+    const isOn = getRuleBit(i);
+    outBit.className = 'bit ' + (isOn ? 'out-on' : 'out-off');
+    output.appendChild(outBit);
+
+    cell.appendChild(input);
+    cell.appendChild(output);
+    cell.addEventListener('click', () => {
+      rule ^= (1 << i);
+      ruleSlider.value = rule;
+      ruleNum.textContent = rule;
+      buildRuleTable();
+      updatePresetButtons();
+      reset();
+    });
+
+    table.appendChild(cell);
+  }
+}
+
+function initGrid() {
+  grid = [];
+  const firstRow = new Uint8Array(cols);
+  if (initMode === 'single') {
+    firstRow[Math.floor(cols / 2)] = 1;
+  } else {
+    for (let i = 0; i < cols; i++) {
+      firstRow[i] = Math.random() < 0.5 ? 1 : 0;
+    }
+  }
+  grid.push(firstRow);
+  currentRow = 0;
+}
+
+function step() {
+  if (currentRow >= rows - 1) {
+    // Scroll up: shift grid, continue
+    grid.shift();
+    currentRow = grid.length - 1;
+    // Redraw everything
+    redrawAll();
+  }
+
+  const prev = grid[currentRow];
+  const next = new Uint8Array(cols);
+  for (let i = 0; i < cols; i++) {
+    const left = prev[(i - 1 + cols) % cols];
+    const center = prev[i];
+    const right = prev[(i + 1) % cols];
+    const index = (left << 2) | (center << 1) | right;
+    next[i] = getRuleBit(index);
+  }
+  grid.push(next);
+  currentRow++;
+  drawRow(currentRow);
+}
+
+function drawRow(rowIdx) {
+  const p = palettes[palette];
+  const row = grid[rowIdx];
+  if (!row) return;
+
+  const imageData = ctx.createImageData(cols * cellSize, cellSize);
+  const data = imageData.data;
+
+  for (let x = 0; x < cols; x++) {
+    const color = row[x] ? p.on : p.off;
+    for (let cy = 0; cy < cellSize; cy++) {
+      for (let cx = 0; cx < cellSize; cx++) {
+        const px = (cy * cols * cellSize + x * cellSize + cx) * 4;
+        data[px] = color[0];
+        data[px + 1] = color[1];
+        data[px + 2] = color[2];
+        data[px + 3] = 255;
+      }
+    }
+  }
+  ctx.putImageData(imageData, 0, rowIdx * cellSize);
+}
+
+function redrawAll() {
+  ctx.fillStyle = `rgb(${palettes[palette].off.join(',')})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (let i = 0; i < grid.length; i++) {
+    drawRow(i);
+  }
+}
+
+function reset() {
+  initGrid();
+  ctx.fillStyle = `rgb(${palettes[palette].off.join(',')})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  drawRow(0);
+  genCounter.textContent = 'gen 0';
+}
+
+let generation = 0;
+function animate(time) {
+  animFrame = requestAnimationFrame(animate);
+  if (!running) return;
+
+  const interval = 1000 / speed;
+  if (time - lastTime < interval) return;
+  lastTime = time;
+
+  step();
+  generation++;
+  genCounter.textContent = `gen ${generation}`;
+}
+
+// Event listeners
+ruleSlider.addEventListener('input', () => {
+  rule = parseInt(ruleSlider.value);
+  ruleNum.textContent = rule;
+  buildRuleTable();
+  updatePresetButtons();
+  reset();
+  generation = 0;
+});
+
+ruleNum.addEventListener('click', () => {
+  const val = prompt('Enter rule number (0–255):', rule);
+  if (val !== null) {
+    const n = parseInt(val);
+    if (n >= 0 && n <= 255) {
+      rule = n;
+      ruleSlider.value = rule;
+      ruleNum.textContent = rule;
+      buildRuleTable();
+      updatePresetButtons();
+      reset();
+      generation = 0;
+    }
+  }
+});
+
+speedSlider.addEventListener('input', () => {
+  speed = parseInt(speedSlider.value);
+});
+
+cellSlider.addEventListener('input', () => {
+  resize();
+  generation = 0;
+});
+
+function updatePresetButtons() {
+  document.querySelectorAll('.presets button').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.rule) === rule);
+  });
+}
+
+document.querySelectorAll('.presets button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    rule = parseInt(btn.dataset.rule);
+    ruleSlider.value = rule;
+    ruleNum.textContent = rule;
+    buildRuleTable();
+    updatePresetButtons();
+    reset();
+    generation = 0;
+  });
+});
+
+document.querySelectorAll('.palette-swatch').forEach(sw => {
+  sw.addEventListener('click', () => {
+    document.querySelectorAll('.palette-swatch').forEach(s => s.classList.remove('active'));
+    sw.classList.add('active');
+    palette = sw.dataset.palette;
+    redrawAll();
+  });
+});
+
+document.getElementById('initSingle').addEventListener('click', () => {
+  initMode = 'single';
+  reset();
+  generation = 0;
+});
+
+document.getElementById('initRandom').addEventListener('click', () => {
+  initMode = 'random';
+  reset();
+  generation = 0;
+});
+
+document.getElementById('initPause').addEventListener('click', () => {
+  running = !running;
+  document.getElementById('initPause').textContent = running ? '⏸ Pause' : '▶ Play';
+});
+
+document.getElementById('initStep').addEventListener('click', () => {
+  if (!running) {
+    step();
+    generation++;
+    genCounter.textContent = `gen ${generation}`;
+  }
+});
+
+// Click to draw on initial row
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left) / cellSize * (canvas.width / rect.width) / cellSize);
+  if (currentRow < 3 && grid[0]) {
+    grid[0][x] = grid[0][x] ? 0 : 1;
+    reset();
+    // Restore edited first row
+    generation = 0;
+  }
+});
+
+// Init
+resize();
+buildRuleTable();
+animFrame = requestAnimationFrame(animate);
+window.addEventListener('resize', () => { resize(); generation = 0; });
+</script>
+
+</body>
+</html>
