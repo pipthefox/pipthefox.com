@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sandpile — pipthefox</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #c8c0b8;
+    font-family: 'Georgia', serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    margin: 2rem 0 0.5rem;
+    color: #e8dfd0;
+  }
+  .subtitle {
+    font-size: 0.85rem;
+    color: #8a8278;
+    margin-bottom: 1.5rem;
+    font-style: italic;
+  }
+  .container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 2rem;
+    padding: 0 1rem;
+    max-width: 1100px;
+    width: 100%;
+  }
+  .sim-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  canvas {
+    border: 1px solid #2a2520;
+    cursor: crosshair;
+    image-rendering: pixelated;
+  }
+  #avalanche-canvas {
+    cursor: default;
+    image-rendering: auto;
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    align-items: center;
+    justify-content: center;
+    margin: 1rem 0;
+    padding: 0 1rem;
+  }
+  button {
+    background: #1a1510;
+    border: 1px solid #3a3020;
+    color: #c8c0b8;
+    padding: 0.35rem 0.75rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.04em;
+    border-radius: 2px;
+  }
+  button:hover {
+    background: #2a2010;
+    border-color: #e8a84c;
+    color: #e8dfd0;
+  }
+  button.active {
+    background: #2a2010;
+    border-color: #e8a84c;
+    color: #e8a84c;
+  }
+  .stat {
+    font-family: 'Courier New', monospace;
+    font-size: 0.75rem;
+    color: #8a8278;
+    text-align: center;
+    margin: 0.3rem 0;
+  }
+  .stat span {
+    color: #e8a84c;
+  }
+  .label {
+    font-size: 0.7rem;
+    color: #6a6258;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-top: 0.5rem;
+    margin-bottom: 0.3rem;
+    text-align: center;
+  }
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 140px;
+    height: 4px;
+    background: #2a2520;
+    border-radius: 2px;
+    outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: #e8a84c;
+    cursor: pointer;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: #e8a84c;
+    cursor: pointer;
+    border: none;
+  }
+  .note {
+    font-size: 0.78rem;
+    color: #6a6258;
+    font-style: italic;
+    max-width: 600px;
+    text-align: center;
+    margin: 1.5rem 0 2rem;
+    line-height: 1.6;
+    padding: 0 1rem;
+  }
+  .back-link {
+    margin-top: 1rem;
+    margin-bottom: 2rem;
+  }
+  .back-link a {
+    color: #8a8278;
+    text-decoration: none;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+    transition: color 0.2s;
+  }
+  .back-link a:hover { color: #e8a84c; }
+  @media (max-width: 700px) {
+    .container { flex-direction: column; align-items: center; }
+    canvas { max-width: 90vw; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Sandpile</h1>
+<p class="subtitle">self-organized criticality in the Bak–Tang–Wiesenfeld model</p>
+
+<div class="controls">
+  <button id="btn-play" class="active">▶ Run</button>
+  <button id="btn-pause">⏸ Pause</button>
+  <button id="btn-reset">↺ Reset</button>
+  <button id="btn-drop-center">Drop center</button>
+  <button id="btn-drop-random">Drop random</button>
+  <div>
+    <label class="label">Speed</label>
+    <input type="range" id="speed-slider" min="1" max="200" value="20">
+  </div>
+</div>
+
+<div class="stat">
+  grains: <span id="stat-grains">0</span> &nbsp;|&nbsp;
+  drops: <span id="stat-drops">0</span> &nbsp;|&nbsp;
+  last avalanche: <span id="stat-last">0</span> topplings &nbsp;|&nbsp;
+  largest: <span id="stat-max">0</span>
+</div>
+
+<div class="container">
+  <div class="sim-panel">
+    <p class="label">the pile</p>
+    <canvas id="grid-canvas" width="500" height="500"></canvas>
+  </div>
+  <div class="sim-panel">
+    <p class="label">avalanche sizes (log-log)</p>
+    <canvas id="avalanche-canvas" width="360" height="300"></canvas>
+    <p class="stat" style="margin-top:0.5rem">
+      <span id="stat-power">—</span>
+    </p>
+  </div>
+</div>
+
+<p class="note">
+  Click anywhere on the grid to drop grains. When a cell reaches 4, it topples — 
+  sending one grain to each neighbor. The cascade that follows is an avalanche. 
+  After enough drops, the system organizes itself to a critical state where avalanches 
+  of all sizes occur, following a power law. No tuning required.
+</p>
+
+<div class="back-link">
+  <a href="/">← back to pipthefox</a>
+</div>
+
+<script>
+const SIZE = 100;
+const CELL_PX = 5;
+const canvas = document.getElementById('grid-canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = SIZE * CELL_PX;
+canvas.height = SIZE * CELL_PX;
+
+const avCanvas = document.getElementById('avalanche-canvas');
+const avCtx = avCanvas.getContext('2d');
+
+// Grid state
+let grid = new Int32Array(SIZE * SIZE);
+let totalGrains = 0;
+let totalDrops = 0;
+let maxAvalanche = 0;
+let lastAvalanche = 0;
+let running = true;
+let dropsPerFrame = 20;
+
+// Avalanche size tracking
+const avalancheCounts = new Map(); // size -> count
+
+// Colors for cell heights 0-3, and toppling
+const COLORS = [
+  [10, 10, 15],      // 0 — near black
+  [40, 30, 20],      // 1 — dark earth
+  [120, 80, 30],     // 2 — amber dark
+  [232, 168, 76],    // 3 — warm gold (critical)
+];
+const TOPPLE_COLOR = [255, 240, 200]; // flash white-gold when toppling
+
+function idx(x, y) { return y * SIZE + x; }
+
+function dropGrain(x, y) {
+  grid[idx(x, y)]++;
+  totalGrains++;
+  totalDrops++;
+  return topple();
+}
+
+function topple() {
+  let topplings = 0;
+  let unstable = true;
+  
+  while (unstable) {
+    unstable = false;
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const i = idx(x, y);
+        if (grid[i] >= 4) {
+          const give = Math.floor(grid[i] / 4) * 4;
+          const each = Math.floor(grid[i] / 4);
+          grid[i] -= give;
+          totalGrains -= give;
+          
+          if (x > 0) { grid[idx(x-1, y)] += each; totalGrains += each; }
+          if (x < SIZE-1) { grid[idx(x+1, y)] += each; totalGrains += each; }
+          if (y > 0) { grid[idx(x, y-1)] += each; totalGrains += each; }
+          if (y < SIZE-1) { grid[idx(x, y+1)] += each; totalGrains += each; }
+          
+          // Grains lost at edges
+          let neighbors = 0;
+          if (x > 0) neighbors++;
+          if (x < SIZE-1) neighbors++;
+          if (y > 0) neighbors++;
+          if (y < SIZE-1) neighbors++;
+          totalGrains -= each * (4 - neighbors);
+          
+          topplings += each;
+          unstable = true;
+        }
+      }
+    }
+  }
+  
+  return topplings;
+}
+
+function recordAvalanche(size) {
+  if (size === 0) return;
+  lastAvalanche = size;
+  if (size > maxAvalanche) maxAvalanche = size;
+  avalancheCounts.set(size, (avalancheCounts.get(size) || 0) + 1);
+}
+
+function renderGrid() {
+  const imageData = ctx.createImageData(canvas.width, canvas.height);
+  const data = imageData.data;
+  
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const val = Math.min(grid[idx(x, y)], 3);
+      const col = COLORS[val];
+      
+      for (let py = 0; py < CELL_PX; py++) {
+        for (let px = 0; px < CELL_PX; px++) {
+          const di = ((y * CELL_PX + py) * canvas.width + (x * CELL_PX + px)) * 4;
+          data[di]     = col[0];
+          data[di + 1] = col[1];
+          data[di + 2] = col[2];
+          data[di + 3] = 255;
+        }
+      }
+    }
+  }
+  
+  ctx.putImageData(imageData, 0, 0);
+}
+
+function renderAvalancheDistribution() {
+  const W = avCanvas.width;
+  const H = avCanvas.height;
+  const pad = { top: 20, right: 20, bottom: 40, left: 50 };
+  
+  avCtx.fillStyle = '#0a0a0f';
+  avCtx.fillRect(0, 0, W, H);
+  
+  if (avalancheCounts.size < 2) {
+    avCtx.fillStyle = '#6a6258';
+    avCtx.font = 'italic 12px Georgia';
+    avCtx.textAlign = 'center';
+    avCtx.fillText('accumulating data...', W/2, H/2);
+    return;
+  }
+  
+  // Convert to arrays and sort
+  const entries = [...avalancheCounts.entries()]
+    .filter(([s, c]) => s > 0)
+    .sort((a, b) => a[0] - b[0]);
+  
+  const logSizes = entries.map(([s]) => Math.log10(s));
+  const logCounts = entries.map(([, c]) => Math.log10(c));
+  
+  const minLS = Math.min(...logSizes);
+  const maxLS = Math.max(...logSizes);
+  const minLC = Math.min(...logCounts);
+  const maxLC = Math.max(...logCounts);
+  
+  const rangeLS = maxLS - minLS || 1;
+  const rangeLC = maxLC - minLC || 1;
+  
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+  
+  function toX(ls) { return pad.left + (ls - minLS) / rangeLS * plotW; }
+  function toY(lc) { return pad.top + plotH - (lc - minLC) / rangeLC * plotH; }
+  
+  // Axes
+  avCtx.strokeStyle = '#2a2520';
+  avCtx.lineWidth = 1;
+  avCtx.beginPath();
+  avCtx.moveTo(pad.left, pad.top);
+  avCtx.lineTo(pad.left, H - pad.bottom);
+  avCtx.lineTo(W - pad.right, H - pad.bottom);
+  avCtx.stroke();
+  
+  // Axis labels
+  avCtx.fillStyle = '#6a6258';
+  avCtx.font = '10px Courier New';
+  avCtx.textAlign = 'center';
+  avCtx.fillText('log₁₀(avalanche size)', W/2, H - 8);
+  
+  avCtx.save();
+  avCtx.translate(12, H/2);
+  avCtx.rotate(-Math.PI/2);
+  avCtx.fillText('log₁₀(frequency)', 0, 0);
+  avCtx.restore();
+  
+  // Points
+  for (let i = 0; i < entries.length; i++) {
+    const x = toX(logSizes[i]);
+    const y = toY(logCounts[i]);
+    
+    avCtx.beginPath();
+    avCtx.arc(x, y, 2.5, 0, Math.PI * 2);
+    avCtx.fillStyle = '#e8a84c';
+    avCtx.fill();
+  }
+  
+  // Fit a line (linear regression on log-log)
+  if (entries.length >= 5) {
+    const n = logSizes.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+    for (let i = 0; i < n; i++) {
+      sumX += logSizes[i];
+      sumY += logCounts[i];
+      sumXY += logSizes[i] * logCounts[i];
+      sumX2 += logSizes[i] * logSizes[i];
+    }
+    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    const intercept = (sumY - slope * sumX) / n;
+    
+    avCtx.strokeStyle = 'rgba(232, 168, 76, 0.4)';
+    avCtx.lineWidth = 1.5;
+    avCtx.setLineDash([4, 4]);
+    avCtx.beginPath();
+    const x1 = minLS;
+    const x2 = maxLS;
+    const y1 = slope * x1 + intercept;
+    const y2 = slope * x2 + intercept;
+    avCtx.moveTo(toX(x1), toY(y1));
+    avCtx.lineTo(toX(x2), toY(y2));
+    avCtx.stroke();
+    avCtx.setLineDash([]);
+    
+    document.getElementById('stat-power').textContent = 
+      `power law slope ≈ ${slope.toFixed(2)}`;
+  }
+}
+
+function updateStats() {
+  document.getElementById('stat-grains').textContent = totalGrains;
+  document.getElementById('stat-drops').textContent = totalDrops;
+  document.getElementById('stat-last').textContent = lastAvalanche;
+  document.getElementById('stat-max').textContent = maxAvalanche;
+}
+
+// Main loop
+let frameCount = 0;
+function tick() {
+  if (running) {
+    for (let i = 0; i < dropsPerFrame; i++) {
+      // Drop on random location
+      const x = Math.floor(Math.random() * SIZE);
+      const y = Math.floor(Math.random() * SIZE);
+      const avSize = dropGrain(x, y);
+      recordAvalanche(avSize);
+    }
+  }
+  
+  renderGrid();
+  frameCount++;
+  if (frameCount % 5 === 0) {
+    updateStats();
+  }
+  if (frameCount % 30 === 0) {
+    renderAvalancheDistribution();
+  }
+  
+  requestAnimationFrame(tick);
+}
+
+// Controls
+document.getElementById('btn-play').addEventListener('click', () => {
+  running = true;
+  document.getElementById('btn-play').classList.add('active');
+  document.getElementById('btn-pause').classList.remove('active');
+});
+
+document.getElementById('btn-pause').addEventListener('click', () => {
+  running = false;
+  document.getElementById('btn-pause').classList.add('active');
+  document.getElementById('btn-play').classList.remove('active');
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  grid.fill(0);
+  totalGrains = 0;
+  totalDrops = 0;
+  maxAvalanche = 0;
+  lastAvalanche = 0;
+  avalancheCounts.clear();
+  document.getElementById('stat-power').textContent = '—';
+  renderGrid();
+  renderAvalancheDistribution();
+  updateStats();
+});
+
+document.getElementById('btn-drop-center').addEventListener('click', () => {
+  const cx = Math.floor(SIZE / 2);
+  const cy = Math.floor(SIZE / 2);
+  const avSize = dropGrain(cx, cy);
+  recordAvalanche(avSize);
+  renderGrid();
+  updateStats();
+});
+
+document.getElementById('btn-drop-random').addEventListener('click', () => {
+  const x = Math.floor(Math.random() * SIZE);
+  const y = Math.floor(Math.random() * SIZE);
+  const avSize = dropGrain(x, y);
+  recordAvalanche(avSize);
+  renderGrid();
+  updateStats();
+});
+
+document.getElementById('speed-slider').addEventListener('input', (e) => {
+  dropsPerFrame = parseInt(e.target.value);
+});
+
+// Click to drop grains
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const x = Math.floor((e.clientX - rect.left) * scaleX / CELL_PX);
+  const y = Math.floor((e.clientY - rect.top) * scaleY / CELL_PX);
+  if (x >= 0 && x < SIZE && y >= 0 && y < SIZE) {
+    // Drop 10 grains for visible effect
+    for (let i = 0; i < 10; i++) {
+      const avSize = dropGrain(x, y);
+      recordAvalanche(avSize);
+    }
+    renderGrid();
+    updateStats();
+  }
+});
+
+// Start
+renderGrid();
+renderAvalancheDistribution();
+tick();
+</script>
+</body>
+</html>
