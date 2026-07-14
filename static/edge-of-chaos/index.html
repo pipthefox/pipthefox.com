@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Edge of Chaos</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #c8c8d0;
+    font-family: 'Georgia', serif;
+    overflow: hidden;
+  }
+  #bifurcation {
+    position: fixed;
+    top: 0; left: 0;
+    cursor: crosshair;
+  }
+  #orbit {
+    position: fixed;
+    top: 0;
+    right: 0;
+  }
+
+  .controls {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    z-index: 10;
+    background: rgba(10, 10, 15, 0.88);
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: 1px solid rgba(200, 200, 208, 0.1);
+    font-size: 13px;
+    font-family: 'Menlo', 'Consolas', monospace;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 90vw;
+  }
+  .controls button {
+    background: rgba(200, 200, 208, 0.08);
+    border: 1px solid rgba(200, 200, 208, 0.2);
+    color: #c8c8d0;
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    transition: background 0.2s;
+  }
+  .controls button:hover { background: rgba(200, 200, 208, 0.15); }
+
+  .info {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 10;
+    font-size: 12px;
+    font-family: 'Menlo', 'Consolas', monospace;
+    color: rgba(200, 200, 208, 0.5);
+    pointer-events: none;
+    line-height: 1.6;
+  }
+
+  .title-overlay {
+    position: fixed;
+    top: 40%;
+    left: 35%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 20;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 2s ease;
+  }
+  .title-overlay.faded { opacity: 0; }
+  .title-overlay h1 {
+    font-size: 28px;
+    font-weight: normal;
+    color: rgba(212, 132, 90, 0.9);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .title-overlay p {
+    font-size: 13px;
+    color: rgba(200, 200, 208, 0.45);
+    font-style: italic;
+  }
+  .title-overlay p + p { margin-top: 4px; }
+
+  .feigenbaum {
+    position: fixed;
+    bottom: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    font-size: 11px;
+    font-family: 'Menlo', 'Consolas', monospace;
+    color: rgba(212, 132, 90, 0.6);
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 1s;
+  }
+  .feigenbaum.visible { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="title-overlay" id="titleOverlay">
+  <h1>The Edge of Chaos</h1>
+  <p>x<sub>n+1</sub> = r · x<sub>n</sub> · (1 − x<sub>n</sub>)</p>
+  <p>hover to explore — scroll to zoom — click to animate orbit</p>
+</div>
+
+<canvas id="bifurcation"></canvas>
+<canvas id="orbit"></canvas>
+
+<div class="info" id="info">
+  <div id="rVal"></div>
+  <div id="periodInfo"></div>
+</div>
+
+<div class="feigenbaum" id="feigenbaum">
+  period-doubling ratios → δ ≈ 4.669201... (Feigenbaum's constant)
+</div>
+
+<div class="controls">
+  <button id="resetBtn">reset zoom</button>
+  <button id="showPeriodsBtn">show period windows</button>
+  <button id="cobwebBtn">cobweb mode</button>
+</div>
+
+<script>
+const bifCanvas = document.getElementById('bifurcation');
+const bifCtx = bifCanvas.getContext('2d');
+const orbCanvas = document.getElementById('orbit');
+const orbCtx = orbCanvas.getContext('2d');
+
+// View bounds for the bifurcation diagram
+let rMin = 2.5, rMax = 4.0;
+let xMin = 0.0, xMax = 1.0;
+
+// Default view
+const defaultView = { rMin: 2.5, rMax: 4.0, xMin: 0.0, xMax: 1.0 };
+
+let bifWidth, bifHeight, orbWidth, orbHeight;
+let showPeriodWindows = false;
+let cobwebMode = false;
+let currentR = 3.5;
+let animatingOrbit = false;
+let orbitAnimFrame = null;
+
+// Period-doubling bifurcation points (approximate)
+const bifurcationPoints = [
+  { r: 3.0,       period: 2, label: 'period 2' },
+  { r: 3.44949,   period: 4, label: 'period 4' },
+  { r: 3.54409,   period: 8, label: 'period 8' },
+  { r: 3.5644,    period: 16, label: 'period 16' },
+  { r: 3.5688,    period: 32, label: 'period 32' },
+  { r: 3.56995,   period: '∞ (chaos)', label: 'chaos onset' },
+];
+
+function resize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  
+  // Bifurcation diagram takes ~70% width
+  bifWidth = Math.floor(w * 0.7);
+  bifHeight = h;
+  bifCanvas.width = bifWidth;
+  bifCanvas.height = bifHeight;
+  bifCanvas.style.width = bifWidth + 'px';
+  bifCanvas.style.height = bifHeight + 'px';
+  
+  // Orbit panel takes remaining 30%
+  orbWidth = w - bifWidth;
+  orbHeight = h;
+  orbCanvas.width = orbWidth;
+  orbCanvas.height = orbHeight;
+  orbCanvas.style.width = orbWidth + 'px';
+  orbCanvas.style.height = orbHeight + 'px';
+  
+  drawBifurcation();
+  drawOrbit(currentR);
+}
+
+function logisticMap(r, x) {
+  return r * x * (1 - x);
+}
+
+function drawBifurcation() {
+  bifCtx.fillStyle = '#0a0a0f';
+  bifCtx.fillRect(0, 0, bifWidth, bifHeight);
+  
+  const warmup = 300;
+  const points = 200;
+  
+  // Use ImageData for performance
+  const imageData = bifCtx.createImageData(bifWidth, bifHeight);
+  const data = imageData.data;
+  
+  for (let px = 0; px < bifWidth; px++) {
+    const r = rMin + (px / bifWidth) * (rMax - rMin);
+    let x = 0.5 + Math.random() * 0.01; // slight jitter to avoid fixed-point traps
+    
+    // Warmup iterations
+    for (let i = 0; i < warmup; i++) {
+      x = logisticMap(r, x);
+    }
+    
+    // Plot attractor points
+    for (let i = 0; i < points; i++) {
+      x = logisticMap(r, x);
+      const py = bifHeight - ((x - xMin) / (xMax - xMin)) * bifHeight;
+      
+      if (py >= 0 && py < bifHeight) {
+        const idx = (Math.floor(py) * bifWidth + px) * 4;
+        // Additive blending for density visualization
+        data[idx]     = Math.min(255, data[idx] + 25);     // R
+        data[idx + 1] = Math.min(255, data[idx + 1] + 15); // G
+        data[idx + 2] = Math.min(255, data[idx + 2] + 8);  // B
+        data[idx + 3] = 255;
+      }
+    }
+  }
+  
+  // Color ramp: apply fox-colored palette
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] === 0) continue;
+    const intensity = data[i] / 255;
+    // Orange/amber for dense regions, cool blue for sparse
+    data[i]     = Math.min(255, intensity * 255 * 0.85 + 15);  // R
+    data[i + 1] = Math.min(255, intensity * 160 * 0.7 + 10);   // G
+    data[i + 2] = Math.min(255, intensity * 60 + (1-intensity) * 50 + 15);  // B
+    data[i + 3] = Math.min(255, 30 + intensity * 225);
+  }
+  
+  bifCtx.putImageData(imageData, 0, 0);
+  
+  // Draw period window markers if enabled
+  if (showPeriodWindows) {
+    drawPeriodMarkers();
+  }
+}
+
+function drawPeriodMarkers() {
+  bifCtx.save();
+  bifCtx.setLineDash([3, 5]);
+  
+  for (const bp of bifurcationPoints) {
+    if (bp.r < rMin || bp.r > rMax) continue;
+    const px = ((bp.r - rMin) / (rMax - rMin)) * bifWidth;
+    
+    bifCtx.strokeStyle = 'rgba(212, 132, 90, 0.3)';
+    bifCtx.lineWidth = 1;
+    bifCtx.beginPath();
+    bifCtx.moveTo(px, 0);
+    bifCtx.lineTo(px, bifHeight);
+    bifCtx.stroke();
+    
+    bifCtx.fillStyle = 'rgba(212, 132, 90, 0.5)';
+    bifCtx.font = '10px Menlo, Consolas, monospace';
+    bifCtx.fillText(bp.label, px + 4, 20);
+    bifCtx.fillText(`r=${bp.r.toFixed(4)}`, px + 4, 34);
+  }
+  
+  bifCtx.restore();
+}
+
+function drawOrbit(r) {
+  orbCtx.fillStyle = '#0a0a0f';
+  orbCtx.fillRect(0, 0, orbWidth, orbHeight);
+  
+  if (cobwebMode) {
+    drawCobweb(r);
+    return;
+  }
+  
+  // Draw orbit time series
+  const iterations = 120;
+  const warmup = 200;
+  let x = 0.5;
+  
+  for (let i = 0; i < warmup; i++) x = logisticMap(r, x);
+  
+  const orbitPoints = [];
+  for (let i = 0; i < iterations; i++) {
+    x = logisticMap(r, x);
+    orbitPoints.push(x);
+  }
+  
+  // Axes
+  orbCtx.strokeStyle = 'rgba(200, 200, 208, 0.15)';
+  orbCtx.lineWidth = 1;
+  const margin = 30;
+  const plotW = orbWidth - margin * 2;
+  const plotH = orbHeight - margin * 2 - 60; // leave room at bottom
+  
+  orbCtx.beginPath();
+  orbCtx.moveTo(margin, margin);
+  orbCtx.lineTo(margin, margin + plotH);
+  orbCtx.lineTo(margin + plotW, margin + plotH);
+  orbCtx.stroke();
+  
+  // Labels
+  orbCtx.fillStyle = 'rgba(200, 200, 208, 0.4)';
+  orbCtx.font = '10px Menlo, Consolas, monospace';
+  orbCtx.fillText('x', margin - 15, margin + plotH / 2);
+  orbCtx.fillText('n', margin + plotW / 2, margin + plotH + 20);
+  orbCtx.fillText(`r = ${r.toFixed(4)}`, margin, margin + plotH + 40);
+  
+  // Detect period
+  const period = detectPeriod(orbitPoints);
+  if (period) {
+    orbCtx.fillStyle = 'rgba(212, 132, 90, 0.6)';
+    orbCtx.fillText(`period: ${period}`, margin, margin + plotH + 55);
+  } else {
+    orbCtx.fillStyle = 'rgba(100, 130, 200, 0.5)';
+    orbCtx.fillText('aperiodic (chaotic)', margin, margin + plotH + 55);
+  }
+  
+  // Plot time series
+  orbCtx.strokeStyle = 'rgba(212, 132, 90, 0.8)';
+  orbCtx.lineWidth = 1.5;
+  orbCtx.beginPath();
+  for (let i = 0; i < orbitPoints.length; i++) {
+    const px = margin + (i / (iterations - 1)) * plotW;
+    const py = margin + plotH - orbitPoints[i] * plotH;
+    if (i === 0) orbCtx.moveTo(px, py);
+    else orbCtx.lineTo(px, py);
+  }
+  orbCtx.stroke();
+  
+  // Dots at each iteration
+  orbCtx.fillStyle = 'rgba(212, 132, 90, 0.9)';
+  for (let i = 0; i < orbitPoints.length; i++) {
+    const px = margin + (i / (iterations - 1)) * plotW;
+    const py = margin + plotH - orbitPoints[i] * plotH;
+    orbCtx.beginPath();
+    orbCtx.arc(px, py, 2, 0, Math.PI * 2);
+    orbCtx.fill();
+  }
+}
+
+function drawCobweb(r) {
+  const margin = 40;
+  const plotSize = Math.min(orbWidth, orbHeight) - margin * 2 - 40;
+  const ox = margin;
+  const oy = margin;
+  
+  // Draw parabola f(x) = rx(1-x)
+  orbCtx.strokeStyle = 'rgba(100, 130, 200, 0.6)';
+  orbCtx.lineWidth = 2;
+  orbCtx.beginPath();
+  for (let i = 0; i <= 200; i++) {
+    const x = i / 200;
+    const y = logisticMap(r, x);
+    const px = ox + x * plotSize;
+    const py = oy + plotSize - y * plotSize;
+    if (i === 0) orbCtx.moveTo(px, py);
+    else orbCtx.lineTo(px, py);
+  }
+  orbCtx.stroke();
+  
+  // Draw y=x line
+  orbCtx.strokeStyle = 'rgba(200, 200, 208, 0.2)';
+  orbCtx.lineWidth = 1;
+  orbCtx.beginPath();
+  orbCtx.moveTo(ox, oy + plotSize);
+  orbCtx.lineTo(ox + plotSize, oy);
+  orbCtx.stroke();
+  
+  // Axes
+  orbCtx.strokeStyle = 'rgba(200, 200, 208, 0.15)';
+  orbCtx.beginPath();
+  orbCtx.moveTo(ox, oy);
+  orbCtx.lineTo(ox, oy + plotSize);
+  orbCtx.lineTo(ox + plotSize, oy + plotSize);
+  orbCtx.stroke();
+  
+  // Cobweb iteration
+  let x = 0.5;
+  const warmup = 10;
+  for (let i = 0; i < warmup; i++) x = logisticMap(r, x);
+  
+  orbCtx.strokeStyle = 'rgba(212, 132, 90, 0.7)';
+  orbCtx.lineWidth = 1;
+  orbCtx.beginPath();
+  
+  let px = ox + x * plotSize;
+  let py = oy + plotSize;
+  orbCtx.moveTo(px, py);
+  
+  for (let i = 0; i < 60; i++) {
+    const y = logisticMap(r, x);
+    // Vertical line to parabola
+    py = oy + plotSize - y * plotSize;
+    orbCtx.lineTo(px, py);
+    // Horizontal line to y=x
+    px = ox + y * plotSize;
+    orbCtx.lineTo(px, py);
+    x = y;
+  }
+  orbCtx.stroke();
+  
+  // Labels
+  orbCtx.fillStyle = 'rgba(200, 200, 208, 0.4)';
+  orbCtx.font = '10px Menlo, Consolas, monospace';
+  orbCtx.fillText(`r = ${r.toFixed(4)}`, ox, oy + plotSize + 25);
+  orbCtx.fillText('cobweb diagram', ox, oy + plotSize + 40);
+  
+  orbCtx.fillStyle = 'rgba(100, 130, 200, 0.5)';
+  orbCtx.fillText('f(x) = rx(1-x)', ox + plotSize - 90, oy + 15);
+  orbCtx.fillStyle = 'rgba(200, 200, 208, 0.3)';
+  orbCtx.fillText('y = x', ox + plotSize - 40, oy + plotSize - 10);
+}
+
+function detectPeriod(points) {
+  // Check last N points for periodicity
+  const n = points.length;
+  const tail = points.slice(-60);
+  const eps = 0.0001;
+  
+  for (let p = 1; p <= 32; p++) {
+    let isPeriodic = true;
+    for (let i = tail.length - 1; i >= p + 5; i--) {
+      if (Math.abs(tail[i] - tail[i - p]) > eps) {
+        isPeriodic = false;
+        break;
+      }
+    }
+    if (isPeriodic) return p;
+  }
+  return null;
+}
+
+// Mouse interaction on bifurcation diagram
+let isDragging = false;
+let dragStart = null;
+let selectionBox = null;
+
+bifCanvas.addEventListener('mousemove', (e) => {
+  if (isDragging) return;
+  const rect = bifCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  
+  currentR = rMin + (mx / bifWidth) * (rMax - rMin);
+  const currentX = xMax - (my / bifHeight) * (xMax - xMin);
+  
+  document.getElementById('rVal').textContent = `r = ${currentR.toFixed(5)}`;
+  
+  // Redraw orbit panel
+  drawOrbit(currentR);
+  
+  // Draw crosshair on bifurcation
+  drawBifurcation();
+  bifCtx.strokeStyle = 'rgba(200, 200, 208, 0.2)';
+  bifCtx.lineWidth = 1;
+  bifCtx.setLineDash([4, 4]);
+  bifCtx.beginPath();
+  bifCtx.moveTo(mx, 0);
+  bifCtx.lineTo(mx, bifHeight);
+  bifCtx.stroke();
+  bifCtx.setLineDash([]);
+  
+  // Show Feigenbaum hint when near chaos onset
+  const feigDiv = document.getElementById('feigenbaum');
+  if (currentR > 3.4 && currentR < 3.6) {
+    feigDiv.classList.add('visible');
+  } else {
+    feigDiv.classList.remove('visible');
+  }
+});
+
+// Zoom with scroll wheel
+bifCanvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = bifCanvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / bifWidth;
+  const my = (e.clientY - rect.top) / bifHeight;
+  
+  const rCenter = rMin + mx * (rMax - rMin);
+  const xCenter = xMax - my * (xMax - xMin);
+  
+  const zoomFactor = e.deltaY > 0 ? 1.2 : 0.8;
+  
+  const rRange = (rMax - rMin) * zoomFactor;
+  const xRange = (xMax - xMin) * zoomFactor;
+  
+  rMin = rCenter - mx * rRange;
+  rMax = rCenter + (1 - mx) * rRange;
+  xMin = xCenter - (1 - my) * xRange;
+  xMax = xCenter + my * xRange;
+  
+  // Clamp
+  rMin = Math.max(0, rMin);
+  rMax = Math.min(4.5, rMax);
+  xMin = Math.max(-0.1, xMin);
+  xMax = Math.min(1.1, xMax);
+  
+  drawBifurcation();
+  
+  document.getElementById('titleOverlay').classList.add('faded');
+}, { passive: false });
+
+// Click to animate orbit
+bifCanvas.addEventListener('click', (e) => {
+  document.getElementById('titleOverlay').classList.add('faded');
+});
+
+// Controls
+document.getElementById('resetBtn').addEventListener('click', () => {
+  rMin = defaultView.rMin;
+  rMax = defaultView.rMax;
+  xMin = defaultView.xMin;
+  xMax = defaultView.xMax;
+  drawBifurcation();
+});
+
+document.getElementById('showPeriodsBtn').addEventListener('click', () => {
+  showPeriodWindows = !showPeriodWindows;
+  document.getElementById('showPeriodsBtn').textContent = showPeriodWindows ? 'hide periods' : 'show period windows';
+  drawBifurcation();
+});
+
+document.getElementById('cobwebBtn').addEventListener('click', () => {
+  cobwebMode = !cobwebMode;
+  document.getElementById('cobwebBtn').textContent = cobwebMode ? 'time series' : 'cobweb mode';
+  drawOrbit(currentR);
+});
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'p') {
+    showPeriodWindows = !showPeriodWindows;
+    document.getElementById('showPeriodsBtn').textContent = showPeriodWindows ? 'hide periods' : 'show period windows';
+    drawBifurcation();
+  } else if (e.key === 'r') {
+    rMin = defaultView.rMin;
+    rMax = defaultView.rMax;
+    xMin = defaultView.xMin;
+    xMax = defaultView.xMax;
+    drawBifurcation();
+  } else if (e.key === 'c') {
+    cobwebMode = !cobwebMode;
+    document.getElementById('cobwebBtn').textContent = cobwebMode ? 'time series' : 'cobweb mode';
+    drawOrbit(currentR);
+  }
+});
+
+// Init
+window.addEventListener('resize', resize);
+resize();
+
+// Fade title after 8 seconds
+setTimeout(() => {
+  document.getElementById('titleOverlay').classList.add('faded');
+}, 8000);
+</script>
+</body>
+</html>
