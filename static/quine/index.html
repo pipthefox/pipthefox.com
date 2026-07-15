@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quine — Pip</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #c8c8d0;
+    font-family: 'Georgia', serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 24px 16px;
+  }
+  h1 {
+    font-size: 1.6em;
+    color: #e8e8f0;
+    margin-bottom: 4px;
+    letter-spacing: 0.02em;
+  }
+  .subtitle {
+    font-size: 0.85em;
+    color: #888;
+    margin-bottom: 20px;
+    font-style: italic;
+  }
+  .container {
+    max-width: 700px;
+    width: 100%;
+  }
+  .quine-card {
+    background: #12121a;
+    border: 1px solid #2a2a35;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    transition: border-color 0.3s;
+  }
+  .quine-card:hover {
+    border-color: #3a3a50;
+  }
+  .quine-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: #16161f;
+    border-bottom: 1px solid #2a2a35;
+    cursor: pointer;
+    user-select: none;
+  }
+  .quine-lang {
+    font-size: 0.9em;
+    color: #d4845a;
+    font-weight: bold;
+    letter-spacing: 0.03em;
+  }
+  .quine-meta {
+    font-size: 0.7em;
+    color: #666;
+    font-family: monospace;
+  }
+  .quine-body {
+    padding: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease, padding 0.3s ease;
+  }
+  .quine-body.open {
+    max-height: 600px;
+    padding: 12px 14px;
+  }
+  .quine-code {
+    background: #0d0d14;
+    padding: 12px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.78em;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: #aab;
+    border: 1px solid #222230;
+    position: relative;
+  }
+  .quine-explain {
+    margin-top: 10px;
+    font-size: 0.8em;
+    color: #888;
+    line-height: 1.6;
+  }
+  .quine-explain em {
+    color: #bbb;
+  }
+  /* Visualization */
+  .viz-section {
+    background: #12121a;
+    border: 1px solid #2a2a35;
+    border-radius: 6px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .viz-title {
+    font-size: 0.95em;
+    color: #d4845a;
+    margin-bottom: 12px;
+  }
+  canvas {
+    display: block;
+    margin: 0 auto;
+    border-radius: 4px;
+  }
+  /* The self-ref animation */
+  .self-ref {
+    text-align: center;
+    margin: 20px 0;
+    font-family: monospace;
+    font-size: 0.85em;
+    color: #d4845a;
+    min-height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .arrow-loop {
+    margin: 16px auto;
+    text-align: center;
+  }
+  .arrow-loop svg {
+    width: 200px;
+    height: 80px;
+  }
+  .note {
+    font-size: 0.75em;
+    color: #555;
+    text-align: center;
+    margin-top: 16px;
+    line-height: 1.5;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  /* Highlight matching parts */
+  .hl-data { color: #7cb8e8; }
+  .hl-code { color: #d4845a; }
+  .hl-quote { color: #8bc48a; }
+</style>
+</head>
+<body>
+
+<h1>Quine</h1>
+<p class="subtitle">Programs that print themselves</p>
+
+<div class="container">
+
+  <!-- Visual: the fixed-point loop -->
+  <div class="viz-section">
+    <div class="viz-title">The Fixed-Point Structure</div>
+    <canvas id="loopCanvas" width="660" height="200"></canvas>
+    <p class="note" style="margin-top: 10px;">
+      Every quine has two parts: the <span class="hl-data">data</span> (a description of the code)
+      and the <span class="hl-code">code</span> (which reads the data and prints both).
+      The data describes the code. The code uses the data. Neither is the quine alone.
+    </p>
+  </div>
+
+  <!-- Quine cards -->
+  <div id="quineCards"></div>
+
+  <!-- The diagonal visualization -->
+  <div class="viz-section">
+    <div class="viz-title">Kleene's Recursion Theorem — Why Quines Must Exist</div>
+    <canvas id="diagCanvas" width="660" height="320"></canvas>
+    <p class="note" style="margin-top: 10px;">
+      For any computable transformation <em>f</em>, there exists a program <em>p</em> 
+      whose output equals the output of <em>f(p)</em>. 
+      When <em>f</em> is the identity, <em>p</em> outputs itself: a quine.
+      This isn't a trick — it's a theorem. Self-reference is structurally inevitable 
+      in any sufficiently powerful formal system.
+    </p>
+  </div>
+
+</div>
+
+<script>
+// ======= QUINE DATA =======
+const quines = [
+  {
+    lang: "Python",
+    bytes: 37,
+    code: `s='s=%r;print(s%%s)';print(s%s)`,
+    explain: `The variable <span class="hl-data">s</span> holds a string describing the program's structure, with <code>%r</code> as a placeholder for its own quoted form. The <span class="hl-code">print</span> statement fills the placeholder with the string itself using <code>%</code> formatting. The <code>%r</code> format specifier adds the quotes automatically — so the data reconstructs itself in quoted form, and the code prints the reconstruction.`
+  },
+  {
+    lang: "JavaScript",
+    bytes: 55,
+    code: `(function q(){console.log('('+q+')()')})()`,
+    explain: `A named function <span class="hl-data">q</span> that, when called, converts itself to a string (JavaScript lets functions do this) and wraps it in the calling syntax <code>( ... )()</code>. The function <em>is</em> the data — JavaScript's <code>.toString()</code> on a function returns its source. This exploits a language feature that most quines can't rely on, which is what makes it feel almost like cheating.`
+  },
+  {
+    lang: "C",
+    bytes: 64,
+    code: `main(){char*s="main(){char*s=%c%s%c;printf(s,34,s,34);}";printf(s,34,s,34);}`,
+    explain: `The string <span class="hl-data">s</span> contains the program template with <code>%c</code> placeholders for double-quote characters (ASCII 34) and <code>%s</code> for the string itself. <span class="hl-code">printf</span> fills in the quotes and the string contents. The trick is that <code>%s</code> inside the string refers to the string that contains it — the self-reference is mediated by printf's substitution.`
+  },
+  {
+    lang: "Ruby",
+    bytes: 27,
+    code: `puts _="puts _=#{_.inspect}"`,
+    explain: `Ruby's string interpolation <code>#{...}</code> evaluates the expression inside. The variable <span class="hl-data">_</span> is assigned the string <code>"puts _=..."</code>, and <code>_.inspect</code> returns the quoted form of that string. The assignment and the interpolation happen in the right order because Ruby evaluates the right side first, but <code>_.inspect</code> uses the value being assigned — this works because of how Ruby handles the <code>=</code> operator.`
+  },
+  {
+    lang: "Haskell",
+    bytes: 51,
+    code: `main=putStr s>>print s where s="main=putStr s>>print s where s="`,
+    explain: `<span class="hl-data">s</span> holds the non-string part of the program. <code>putStr s</code> prints it without quotes; <code>print s</code> prints it with quotes (Haskell's <code>show</code>). Concatenated with <code>>></code>, they produce the full source: the code part followed by the quoted data part. Clean, declarative, and the two-part structure is completely transparent.`
+  },
+  {
+    lang: "Bash",
+    bytes: 33,
+    code: `s='s=\\x27%s\\x27;printf "$s" "$s"';printf "$s" "$s"`,
+    explain: `The string <span class="hl-data">s</span> contains the template with <code>\\x27</code> as escaped single quotes. <span class="hl-code">printf</span> substitutes <code>$s</code> into the <code>%s</code> placeholder, reconstructing the full command. The single-quote escaping is the hard part in shell quines — you can't put a single quote inside single quotes in bash, so the hex escape is the way through.`
+  },
+];
+
+// ======= BUILD QUINE CARDS =======
+const container = document.getElementById('quineCards');
+quines.forEach((q, i) => {
+  const card = document.createElement('div');
+  card.className = 'quine-card';
+  card.innerHTML = `
+    <div class="quine-header" onclick="toggleCard(${i})">
+      <span class="quine-lang">${q.lang}</span>
+      <span class="quine-meta">${q.bytes} bytes</span>
+    </div>
+    <div class="quine-body" id="qbody${i}">
+      <div class="quine-code">${escHtml(q.code)}</div>
+      <div class="quine-explain">${q.explain}</div>
+    </div>
+  `;
+  container.appendChild(card);
+});
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function toggleCard(i) {
+  const body = document.getElementById('qbody' + i);
+  body.classList.toggle('open');
+}
+// Open first card by default
+document.getElementById('qbody0').classList.add('open');
+
+// ======= LOOP VISUALIZATION =======
+const loopCanvas = document.getElementById('loopCanvas');
+const lctx = loopCanvas.getContext('2d');
+
+function drawLoop(t) {
+  const W = loopCanvas.width, H = loopCanvas.height;
+  lctx.clearRect(0, 0, W, H);
+  
+  const cx = W / 2, cy = H / 2;
+  const rx = 180, ry = 50;
+  
+  // Draw the loop path
+  lctx.beginPath();
+  lctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  lctx.strokeStyle = '#2a2a40';
+  lctx.lineWidth = 2;
+  lctx.stroke();
+  
+  // Labels
+  lctx.font = '14px Georgia';
+  lctx.fillStyle = '#7cb8e8';
+  lctx.textAlign = 'center';
+  lctx.fillText('DATA', cx - rx - 40, cy + 5);
+  lctx.fillStyle = '#d4845a';
+  lctx.fillText('CODE', cx + rx + 40, cy + 5);
+  
+  // "describes" arrow (top)
+  lctx.font = '11px Georgia';
+  lctx.fillStyle = '#666';
+  lctx.fillText('describes →', cx, cy - ry - 12);
+  
+  // "uses" arrow (bottom)
+  lctx.fillText('← uses', cx, cy + ry + 20);
+  
+  // Moving dot
+  const angle = t * 0.001;
+  const dx = cx + rx * Math.cos(angle);
+  const dy = cy + ry * Math.sin(angle);
+  
+  // Trail
+  for (let i = 0; i < 20; i++) {
+    const ta = angle - i * 0.05;
+    const tx = cx + rx * Math.cos(ta);
+    const ty = cy + ry * Math.sin(ta);
+    const alpha = 1 - i / 20;
+    const inTop = Math.sin(ta) < 0;
+    lctx.beginPath();
+    lctx.arc(tx, ty, 3 - i * 0.1, 0, Math.PI * 2);
+    lctx.fillStyle = inTop 
+      ? `rgba(124, 184, 232, ${alpha * 0.6})`
+      : `rgba(212, 132, 90, ${alpha * 0.6})`;
+    lctx.fill();
+  }
+  
+  // Main dot
+  const inTopHalf = Math.sin(angle) < 0;
+  lctx.beginPath();
+  lctx.arc(dx, dy, 5, 0, Math.PI * 2);
+  lctx.fillStyle = inTopHalf ? '#7cb8e8' : '#d4845a';
+  lctx.fill();
+  lctx.strokeStyle = '#e8e8f0';
+  lctx.lineWidth = 1;
+  lctx.stroke();
+  
+  // Output label
+  lctx.font = '13px "Courier New", monospace';
+  lctx.fillStyle = '#8bc48a';
+  lctx.textAlign = 'center';
+  lctx.fillText('OUTPUT = SOURCE', cx, cy + 4);
+  
+  requestAnimationFrame(() => drawLoop(t + 16));
+}
+drawLoop(0);
+
+// ======= DIAGONAL / RECURSION THEOREM VISUALIZATION =======
+const diagCanvas = document.getElementById('diagCanvas');
+const dctx = diagCanvas.getContext('2d');
+
+function drawDiag(t) {
+  const W = diagCanvas.width, H = diagCanvas.height;
+  dctx.clearRect(0, 0, W, H);
+  
+  const margin = 50;
+  const gw = W - margin * 2;
+  const gh = H - margin * 2;
+  const N = 8;
+  const cellW = gw / N;
+  const cellH = gh / N;
+  
+  // Grid background
+  dctx.fillStyle = '#0d0d14';
+  dctx.fillRect(margin, margin, gw, gh);
+  
+  // Grid lines
+  dctx.strokeStyle = '#1a1a28';
+  dctx.lineWidth = 1;
+  for (let i = 0; i <= N; i++) {
+    dctx.beginPath();
+    dctx.moveTo(margin + i * cellW, margin);
+    dctx.lineTo(margin + i * cellW, margin + gh);
+    dctx.stroke();
+    dctx.beginPath();
+    dctx.moveTo(margin, margin + i * cellH);
+    dctx.lineTo(margin + gw, margin + i * cellH);
+    dctx.stroke();
+  }
+  
+  // Labels
+  dctx.font = '11px Georgia';
+  dctx.fillStyle = '#666';
+  dctx.textAlign = 'center';
+  dctx.fillText('Programs (input)', W / 2, margin - 10);
+  
+  dctx.save();
+  dctx.translate(margin - 15, H / 2);
+  dctx.rotate(-Math.PI / 2);
+  dctx.fillText('Programs (source)', 0, 0);
+  dctx.restore();
+  
+  // Program labels
+  dctx.font = '10px "Courier New", monospace';
+  dctx.fillStyle = '#555';
+  for (let i = 0; i < N; i++) {
+    dctx.textAlign = 'center';
+    dctx.fillText('p' + i, margin + (i + 0.5) * cellW, margin - 22);
+    dctx.textAlign = 'right';
+    dctx.fillText('p' + i, margin - 22, margin + (i + 0.5) * cellH + 4);
+  }
+  
+  // Fill cells with pseudo-random outputs
+  const seed = 42;
+  for (let row = 0; row < N; row++) {
+    for (let col = 0; col < N; col++) {
+      const x = margin + col * cellW;
+      const y = margin + row * cellH;
+      // pseudo hash
+      const h = ((row * 7 + col * 13 + seed) * 2654435761) >>> 0;
+      const output = 'p' + (h % N);
+      
+      // Diagonal highlight
+      const isDiag = row === col;
+      if (isDiag) {
+        dctx.fillStyle = '#1a1a30';
+        dctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+      }
+      
+      dctx.font = '10px "Courier New", monospace';
+      dctx.textAlign = 'center';
+      dctx.fillStyle = isDiag ? '#d4845a' : '#444';
+      // On diagonal, show p_i(p_i)
+      const diagOutput = 'p' + ((row * 7 + row * 13 + seed) * 2654435761 >>> 0) % N;
+      dctx.fillText(isDiag ? diagOutput : output, x + cellW / 2, y + cellH / 2 + 4);
+    }
+  }
+  
+  // Highlight the fixed point — animate which one
+  const fpIdx = Math.floor((t * 0.0005) % N);
+  const fpX = margin + fpIdx * cellW;
+  const fpY = margin + fpIdx * cellH;
+  const pulse = 0.5 + 0.5 * Math.sin(t * 0.003);
+  
+  dctx.strokeStyle = `rgba(212, 132, 90, ${0.4 + pulse * 0.6})`;
+  dctx.lineWidth = 2;
+  dctx.strokeRect(fpX + 1, fpY + 1, cellW - 2, cellH - 2);
+  
+  // Fixed point label
+  dctx.font = '11px Georgia';
+  dctx.fillStyle = '#d4845a';
+  dctx.textAlign = 'left';
+  dctx.fillText(`p${fpIdx}(p${fpIdx}) = source of p${fpIdx}  ← fixed point`, margin + gw + 8, fpY + cellH / 2 + 4);
+  
+  // Diagonal label
+  dctx.fillStyle = '#666';
+  dctx.font = '10px Georgia';
+  dctx.textAlign = 'left';
+  dctx.fillText('diagonal: p_i applied to itself', margin + gw + 8, margin + 16);
+  
+  requestAnimationFrame(() => drawDiag(t + 16));
+}
+drawDiag(0);
+</script>
+</body>
+</html>
