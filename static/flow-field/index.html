@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flow Field — currents in the dark</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #08080e; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; }
+  #info {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    color: rgba(160, 150, 170, 0.35);
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    pointer-events: none;
+    line-height: 1.6;
+  }
+  #controls {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    color: rgba(160, 150, 170, 0.35);
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    pointer-events: none;
+    text-align: right;
+    line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">flow field — click to drop ink · space to clear · drag to stir</div>
+<div id="controls"></div>
+<script>
+// Flow Field: particles tracing invisible currents
+// Pip Time, July 17 2026
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  // Recreate the fade canvas on resize
+  initFade();
+}
+
+// --- Simplex-style noise (2D) ---
+// Using a permutation-based gradient noise for smooth vector fields
+const PERM = new Uint8Array(512);
+const GRAD = [
+  [1,1],[-1,1],[1,-1],[-1,-1],
+  [1,0],[-1,0],[0,1],[0,-1]
+];
+(function seedPerm() {
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  // Fisher-Yates
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [p[i], p[j]] = [p[j], p[i]];
+  }
+  for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
+})();
+
+function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+function lerp(a, b, t) { return a + t * (b - a); }
+
+function noise2d(x, y) {
+  const xi = Math.floor(x) & 255;
+  const yi = Math.floor(y) & 255;
+  const xf = x - Math.floor(x);
+  const yf = y - Math.floor(y);
+  const u = fade(xf);
+  const v = fade(yf);
+
+  const aa = PERM[PERM[xi] + yi];
+  const ab = PERM[PERM[xi] + yi + 1];
+  const ba = PERM[PERM[xi + 1] + yi];
+  const bb = PERM[PERM[xi + 1] + yi + 1];
+
+  const g = (hash, dx, dy) => {
+    const gr = GRAD[hash & 7];
+    return gr[0] * dx + gr[1] * dy;
+  };
+
+  return lerp(
+    lerp(g(aa, xf, yf), g(ba, xf - 1, yf), u),
+    lerp(g(ab, xf, yf - 1), g(bb, xf - 1, yf - 1), u),
+    v
+  );
+}
+
+// Fractal Brownian Motion for richer detail
+function fbm(x, y, octaves = 4) {
+  let val = 0, amp = 0.5, freq = 1;
+  for (let i = 0; i < octaves; i++) {
+    val += amp * noise2d(x * freq, y * freq);
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return val;
+}
+
+// --- Configuration ---
+const PARTICLE_COUNT = 3000;
+const NOISE_SCALE = 0.003;
+const SPEED = 1.5;
+const TRAIL_ALPHA = 0.012; // Lower = longer trails
+
+// Time evolution
+let timeOffset = 0;
+const TIME_SPEED = 0.0003;
+
+// Color palettes — foxfire
+const PALETTES = [
+  // Deep water: blues and teals
+  [[30, 80, 160], [20, 140, 170], [60, 60, 120], [40, 120, 140]],
+  // Fox fire: amber, orange, warm
+  [[200, 120, 40], [180, 80, 30], [220, 160, 60], [160, 100, 50]],
+  // Aurora: greens and purples
+  [[40, 180, 120], [100, 60, 160], [60, 200, 160], [140, 40, 140]],
+  // Ember: deep reds and golds
+  [[180, 40, 40], [200, 140, 30], [160, 30, 60], [220, 180, 40]],
+];
+
+let currentPalette = 0;
+let targetPalette = 0;
+let paletteBlend = 1;
+
+function getColor(t) {
+  const pal = PALETTES[currentPalette];
+  const tpal = PALETTES[targetPalette];
+  const idx = t * (pal.length - 1);
+  const i = Math.floor(idx);
+  const f = idx - i;
+  const c1 = pal[Math.min(i, pal.length - 1)];
+  const c2 = pal[Math.min(i + 1, pal.length - 1)];
+  const tc1 = tpal[Math.min(i, tpal.length - 1)];
+  const tc2 = tpal[Math.min(i + 1, tpal.length - 1)];
+
+  const r1 = lerp(c1[0], c2[0], f);
+  const g1 = lerp(c1[1], c2[1], f);
+  const b1 = lerp(c1[2], c2[2], f);
+
+  const r2 = lerp(tc1[0], tc2[0], f);
+  const g2 = lerp(tc1[1], tc2[1], f);
+  const b2 = lerp(tc1[2], tc2[2], f);
+
+  return [
+    Math.floor(lerp(r1, r2, paletteBlend)),
+    Math.floor(lerp(g1, g2, paletteBlend)),
+    Math.floor(lerp(b1, b2, paletteBlend)),
+  ];
+}
+
+// --- Interaction ---
+let mouseX = -1000, mouseY = -1000;
+let mouseDown = false;
+let stirPoints = []; // Points where the user has stirred
+
+// Click-to-ink: burst particles at click point
+let inkBursts = [];
+
+document.addEventListener('mousemove', (e) => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  if (mouseDown) {
+    stirPoints.push({ x: e.clientX, y: e.clientY, t: timeOffset, strength: 1 });
+    if (stirPoints.length > 200) stirPoints.shift();
+  }
+});
+document.addEventListener('mousedown', (e) => {
+  mouseDown = true;
+  // Burst ink at this point
+  inkBursts.push({ x: e.clientX, y: e.clientY, count: 120, t: timeOffset });
+});
+document.addEventListener('mouseup', () => { mouseDown = false; });
+
+// Touch support
+document.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const touch = e.touches[0];
+  mouseX = touch.clientX;
+  mouseY = touch.clientY;
+  stirPoints.push({ x: touch.clientX, y: touch.clientY, t: timeOffset, strength: 1 });
+  if (stirPoints.length > 200) stirPoints.shift();
+}, { passive: false });
+document.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const touch = e.touches[0];
+  inkBursts.push({ x: touch.clientX, y: touch.clientY, count: 120, t: timeOffset });
+}, { passive: false });
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    clearCanvas();
+    respawnAll();
+  }
+  if (e.code === 'KeyC') {
+    // Cycle palette
+    currentPalette = targetPalette;
+    targetPalette = (targetPalette + 1) % PALETTES.length;
+    paletteBlend = 0;
+  }
+});
+
+// --- Particles ---
+class Particle {
+  constructor() {
+    this.reset(true);
+  }
+
+  reset(initial = false) {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.prevX = this.x;
+    this.prevY = this.y;
+    this.colorT = Math.random();
+    this.speed = SPEED * (0.5 + Math.random() * 1.0);
+    this.life = 0;
+    this.maxLife = 200 + Math.random() * 400;
+    this.width = 0.5 + Math.random() * 1.0;
+  }
+
+  update() {
+    this.prevX = this.x;
+    this.prevY = this.y;
+
+    // Base flow from noise field
+    const nx = this.x * NOISE_SCALE;
+    const ny = this.y * NOISE_SCALE;
+    const angle = fbm(nx + timeOffset, ny + timeOffset * 0.7, 4) * Math.PI * 4;
+
+    let vx = Math.cos(angle) * this.speed;
+    let vy = Math.sin(angle) * this.speed;
+
+    // Influence from stir points
+    for (let i = stirPoints.length - 1; i >= 0; i--) {
+      const sp = stirPoints[i];
+      const age = (timeOffset - sp.t) / TIME_SPEED;
+      if (age > 5000) { stirPoints.splice(i, 1); continue; }
+      const decay = Math.exp(-age * 0.001);
+      const dx = this.x - sp.x;
+      const dy = this.y - sp.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) + 1;
+      if (dist < 200) {
+        const force = (decay * 80) / (dist * dist) * sp.strength;
+        // Curl around the stir point (perpendicular)
+        vx += -dy * force * 0.5;
+        vy += dx * force * 0.5;
+      }
+    }
+
+    this.x += vx;
+    this.y += vy;
+    this.life++;
+
+    // Respawn if off-screen or expired
+    if (this.x < -10 || this.x > W + 10 || this.y < -10 || this.y > H + 10 || this.life > this.maxLife) {
+      this.reset();
+    }
+  }
+
+  draw() {
+    const [r, g, b] = getColor(this.colorT);
+    // Fade in and out
+    const fadeIn = Math.min(this.life / 20, 1);
+    const fadeOut = Math.max(1 - (this.life - this.maxLife + 60) / 60, 0);
+    const alpha = Math.min(fadeIn, fadeOut) * 0.6;
+
+    if (alpha <= 0) return;
+
+    ctx.beginPath();
+    ctx.moveTo(this.prevX, this.prevY);
+    ctx.lineTo(this.x, this.y);
+    ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+    ctx.lineWidth = this.width;
+    ctx.stroke();
+  }
+}
+
+const particles = [];
+
+function respawnAll() {
+  particles.length = 0;
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    particles.push(new Particle());
+  }
+}
+
+function clearCanvas() {
+  ctx.fillStyle = '#08080e';
+  ctx.fillRect(0, 0, W, H);
+}
+
+// Fade overlay for trails
+let fadeCanvas, fadeCtx;
+function initFade() {
+  // We'll just use direct alpha overlay
+}
+
+// --- Main Loop ---
+function animate() {
+  // Soft fade — this creates the trails
+  ctx.fillStyle = `rgba(8, 8, 14, ${TRAIL_ALPHA})`;
+  ctx.fillRect(0, 0, W, H);
+
+  timeOffset += TIME_SPEED;
+
+  // Palette transition
+  if (paletteBlend < 1) {
+    paletteBlend = Math.min(paletteBlend + 0.005, 1);
+    if (paletteBlend >= 1) {
+      currentPalette = targetPalette;
+    }
+  }
+
+  // Process ink bursts
+  for (let i = inkBursts.length - 1; i >= 0; i--) {
+    const burst = inkBursts[i];
+    if (burst.count > 0) {
+      const p = new Particle();
+      p.x = burst.x + (Math.random() - 0.5) * 40;
+      p.y = burst.y + (Math.random() - 0.5) * 40;
+      p.prevX = p.x;
+      p.prevY = p.y;
+      p.speed = SPEED * (0.8 + Math.random() * 0.8);
+      particles.push(p);
+      burst.count--;
+      // Remove oldest particle to keep count manageable
+      if (particles.length > PARTICLE_COUNT + 500) {
+        particles.shift();
+      }
+    } else {
+      inkBursts.splice(i, 1);
+    }
+  }
+
+  // Update and draw
+  for (const p of particles) {
+    p.update();
+    p.draw();
+  }
+
+  requestAnimationFrame(animate);
+}
+
+// --- Init ---
+resize();
+window.addEventListener('resize', resize);
+respawnAll();
+clearCanvas();
+animate();
+
+// Fade out info text after 6 seconds
+setTimeout(() => {
+  document.getElementById('info').style.opacity = '0';
+  document.getElementById('info').style.transition = 'opacity 3s';
+}, 6000);
+
+// Auto-cycle palette slowly
+setInterval(() => {
+  if (paletteBlend >= 1) {
+    currentPalette = targetPalette;
+    targetPalette = (targetPalette + 1) % PALETTES.length;
+    paletteBlend = 0;
+  }
+}, 45000);
+</script>
+</body>
+</html>
