@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Physarum — Pip the Fox</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0a;
+  overflow: hidden;
+  font-family: Georgia, 'Times New Roman', serif;
+  cursor: crosshair;
+}
+canvas { display: block; position: fixed; top: 0; left: 0; }
+
+#controls {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  opacity: 0.35;
+  transition: opacity 0.5s;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 90vw;
+}
+#controls:hover { opacity: 0.9; }
+#controls label {
+  color: #7a7a5a;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+}
+#controls input[type="range"] {
+  width: 80px;
+  accent-color: #c4a454;
+}
+#controls button {
+  background: transparent;
+  border: 1px solid #4a4a3a;
+  color: #7a7a5a;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: Georgia, serif;
+  border-radius: 3px;
+  transition: all 0.3s;
+}
+#controls button:hover {
+  border-color: #c4a454;
+  color: #c4a454;
+}
+#controls select {
+  background: #1a1a1a;
+  border: 1px solid #4a4a3a;
+  color: #7a7a5a;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: Georgia, serif;
+  border-radius: 3px;
+}
+
+#info {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 10;
+  color: #4a4a3a;
+  font-size: 12px;
+  text-align: right;
+  opacity: 0.35;
+  transition: opacity 0.5s;
+  line-height: 1.6;
+}
+#info:hover { opacity: 0.8; }
+
+#agent-count {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 10;
+  color: #4a4a3a;
+  font-size: 11px;
+  letter-spacing: 1px;
+  opacity: 0.35;
+  transition: opacity 0.5s;
+}
+#agent-count:hover { opacity: 0.8; }
+</style>
+</head>
+<body>
+
+<canvas id="display"></canvas>
+
+<div id="agent-count"></div>
+
+<div id="info">
+  click to place food<br>
+  right-click to add agents<br>
+  space to clear trails
+</div>
+
+<div id="controls">
+  <label>agents</label>
+  <input type="range" id="agentCount" min="5000" max="100000" value="30000" step="5000">
+  <label>sensor angle</label>
+  <input type="range" id="sensorAngle" min="10" max="90" value="30">
+  <label>sensor dist</label>
+  <input type="range" id="sensorDist" min="3" max="30" value="12">
+  <label>turn speed</label>
+  <input type="range" id="turnSpeed" min="10" max="90" value="45">
+  <label>decay</label>
+  <input type="range" id="decay" min="80" max="99" value="95">
+  <select id="colorScheme">
+    <option value="amber">amber</option>
+    <option value="bioluminescent">bioluminescent</option>
+    <option value="plasma">plasma</option>
+    <option value="bone">bone</option>
+  </select>
+  <button id="reset">reset</button>
+  <button id="clearTrails">clear trails</button>
+</div>
+
+<script>
+// ---- Simulation on offscreen canvas, display on visible canvas ----
+const display = document.getElementById('display');
+const displayCtx = display.getContext('2d');
+
+let W, H;
+let simW, simH; // simulation resolution (lower for performance)
+
+// Offscreen canvases
+let trailCanvas, trailCtx;
+let trailData; // ImageData for direct pixel manipulation
+
+// Agents
+let agents = [];
+const MOVE_SPEED = 1.5;
+
+// Food sources (attractors)
+let foods = [];
+
+// Color schemes
+const COLORS = {
+  amber: (v) => {
+    const r = Math.min(255, v * 1.2 + 20);
+    const g = Math.min(255, v * 0.8 + 5);
+    const b = Math.min(255, v * 0.2);
+    return [r, g, b];
+  },
+  bioluminescent: (v) => {
+    const r = Math.min(255, v * 0.2);
+    const g = Math.min(255, v * 1.1 + 10);
+    const b = Math.min(255, v * 0.7 + 15);
+    return [r, g, b];
+  },
+  plasma: (v) => {
+    const r = Math.min(255, v * 1.0 + 30);
+    const g = Math.min(255, v * 0.3);
+    const b = Math.min(255, v * 1.2 + 20);
+    return [r, g, b];
+  },
+  bone: (v) => {
+    const r = Math.min(255, v * 1.05 + 5);
+    const g = Math.min(255, v * 1.0 + 5);
+    const b = Math.min(255, v * 0.9 + 5);
+    return [r, g, b];
+  },
+};
+
+let currentColorScheme = 'amber';
+
+class Agent {
+  constructor(x, y, angle) {
+    this.x = x !== undefined ? x : Math.random() * simW;
+    this.y = y !== undefined ? y : Math.random() * simH;
+    this.angle = angle !== undefined ? angle : Math.random() * Math.PI * 2;
+  }
+}
+
+function getParams() {
+  const sensorAngleDeg = parseInt(document.getElementById('sensorAngle').value);
+  const sensorDist = parseInt(document.getElementById('sensorDist').value);
+  const turnSpeedDeg = parseInt(document.getElementById('turnSpeed').value);
+  const decayPercent = parseInt(document.getElementById('decay').value);
+  return {
+    sensorAngle: sensorAngleDeg * Math.PI / 180,
+    sensorDist,
+    turnSpeed: turnSpeedDeg * Math.PI / 180,
+    decay: decayPercent / 100,
+  };
+}
+
+function resize() {
+  W = display.width = window.innerWidth;
+  H = display.height = window.innerHeight;
+
+  // Simulation at half resolution for performance
+  simW = Math.floor(W / 2);
+  simH = Math.floor(H / 2);
+
+  trailCanvas = document.createElement('canvas');
+  trailCanvas.width = simW;
+  trailCanvas.height = simH;
+  trailCtx = trailCanvas.getContext('2d', { willReadFrequently: true });
+  trailCtx.fillStyle = '#000';
+  trailCtx.fillRect(0, 0, simW, simH);
+  trailData = trailCtx.getImageData(0, 0, simW, simH);
+}
+
+function initAgents(count) {
+  agents = [];
+  const cx = simW / 2;
+  const cy = simH / 2;
+
+  for (let i = 0; i < count; i++) {
+    // Spawn in a ring
+    const angle = Math.random() * Math.PI * 2;
+    const r = 50 + Math.random() * Math.min(simW, simH) * 0.3;
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    // Point inward initially
+    const heading = Math.atan2(cy - y, cx - x) + (Math.random() - 0.5) * 0.5;
+    agents.push(new Agent(x, y, heading));
+  }
+}
+
+function sense(agent, angleOffset, params) {
+  const sAngle = agent.angle + angleOffset;
+  const sx = Math.round(agent.x + Math.cos(sAngle) * params.sensorDist);
+  const sy = Math.round(agent.y + Math.sin(sAngle) * params.sensorDist);
+
+  // Sum trail values in a small area
+  let sum = 0;
+  const r = 2;
+  const data = trailData.data;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const px = sx + dx;
+      const py = sy + dy;
+      if (px >= 0 && px < simW && py >= 0 && py < simH) {
+        const idx = (py * simW + px) * 4;
+        sum += data[idx]; // red channel as trail intensity
+      }
+    }
+  }
+
+  // Add food attraction
+  for (const food of foods) {
+    const fdx = food.x - sx;
+    const fdy = food.y - sy;
+    const dist = Math.sqrt(fdx * fdx + fdy * fdy);
+    if (dist < food.radius) {
+      sum += food.strength * (1 - dist / food.radius);
+    }
+  }
+
+  return sum;
+}
+
+function updateAgents(params) {
+  const data = trailData.data;
+
+  for (const agent of agents) {
+    // Sense
+    const fwd = sense(agent, 0, params);
+    const left = sense(agent, -params.sensorAngle, params);
+    const right = sense(agent, params.sensorAngle, params);
+
+    // Steer
+    if (fwd >= left && fwd >= right) {
+      // Continue straight (maybe wiggle a tiny bit)
+      agent.angle += (Math.random() - 0.5) * 0.05;
+    } else if (left > right) {
+      agent.angle -= params.turnSpeed;
+    } else if (right > left) {
+      agent.angle += params.turnSpeed;
+    } else {
+      // left == right, random turn
+      agent.angle += (Math.random() < 0.5 ? -1 : 1) * params.turnSpeed;
+    }
+
+    // Move
+    agent.x += Math.cos(agent.angle) * MOVE_SPEED;
+    agent.y += Math.sin(agent.angle) * MOVE_SPEED;
+
+    // Wrap
+    if (agent.x < 0) agent.x += simW;
+    if (agent.x >= simW) agent.x -= simW;
+    if (agent.y < 0) agent.y += simH;
+    if (agent.y >= simH) agent.y -= simH;
+
+    // Deposit trail
+    const px = Math.floor(agent.x);
+    const py = Math.floor(agent.y);
+    if (px >= 0 && px < simW && py >= 0 && py < simH) {
+      const idx = (py * simW + px) * 4;
+      data[idx] = Math.min(255, data[idx] + 40); // deposit
+    }
+  }
+}
+
+function diffuseAndDecay(params) {
+  const data = trailData.data;
+  const newData = new Uint8ClampedArray(data.length);
+  const decay = params.decay;
+
+  for (let y = 0; y < simH; y++) {
+    for (let x = 0; x < simW; x++) {
+      // 3x3 box blur on red channel
+      let sum = 0;
+      let count = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx >= 0 && nx < simW && ny >= 0 && ny < simH) {
+            sum += data[(ny * simW + nx) * 4];
+            count++;
+          }
+        }
+      }
+      const idx = (y * simW + x) * 4;
+      const blurred = sum / count;
+      newData[idx] = Math.floor(blurred * decay);
+      newData[idx + 1] = 0;
+      newData[idx + 2] = 0;
+      newData[idx + 3] = 255;
+    }
+  }
+
+  // Copy back
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = newData[i];
+    data[i + 1] = 0;
+    data[i + 2] = 0;
+    data[i + 3] = 255;
+  }
+}
+
+function render() {
+  const colorFn = COLORS[currentColorScheme];
+  const data = trailData.data;
+
+  // Build colored display
+  const displayData = displayCtx.createImageData(simW, simH);
+  const dd = displayData.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const v = data[i];
+    if (v < 2) {
+      dd[i] = 5;
+      dd[i + 1] = 5;
+      dd[i + 2] = 8;
+      dd[i + 3] = 255;
+    } else {
+      const [r, g, b] = colorFn(v);
+      dd[i] = r;
+      dd[i + 1] = g;
+      dd[i + 2] = b;
+      dd[i + 3] = 255;
+    }
+  }
+
+  // Draw to offscreen same-size canvas, then scale up
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = simW;
+  tempCanvas.height = simH;
+  const tempCtx = tempCanvas.getContext('2d');
+  tempCtx.putImageData(displayData, 0, 0);
+
+  displayCtx.imageSmoothingEnabled = true;
+  displayCtx.drawImage(tempCanvas, 0, 0, W, H);
+
+  // Draw food sources
+  for (const food of foods) {
+    const scale = W / simW;
+    displayCtx.beginPath();
+    displayCtx.arc(food.x * scale, food.y * scale, food.radius * scale * 0.3, 0, Math.PI * 2);
+    displayCtx.fillStyle = `rgba(255, 200, 100, ${0.15 + 0.1 * Math.sin(performance.now() / 500)})`;
+    displayCtx.fill();
+  }
+}
+
+// --- Main loop ---
+let frameCount = 0;
+
+function animate() {
+  const params = getParams();
+
+  // Adjust agent count
+  const targetCount = parseInt(document.getElementById('agentCount').value);
+  while (agents.length < targetCount) {
+    agents.push(new Agent());
+  }
+  while (agents.length > targetCount) {
+    agents.pop();
+  }
+
+  // Run multiple simulation steps per frame for speed
+  const stepsPerFrame = 3;
+  for (let s = 0; s < stepsPerFrame; s++) {
+    updateAgents(params);
+  }
+
+  // Diffuse/decay every frame
+  diffuseAndDecay(params);
+
+  // Update trail imagedata
+  trailCtx.putImageData(trailData, 0, 0);
+
+  // Render
+  render();
+
+  // Update agent count display
+  if (frameCount % 30 === 0) {
+    document.getElementById('agent-count').textContent = `${agents.length.toLocaleString()} agents`;
+  }
+
+  frameCount++;
+  requestAnimationFrame(animate);
+}
+
+// --- Events ---
+window.addEventListener('resize', () => {
+  resize();
+  initAgents(parseInt(document.getElementById('agentCount').value));
+});
+
+display.addEventListener('click', (e) => {
+  const scale = simW / W;
+  foods.push({
+    x: e.clientX * scale,
+    y: e.clientY * scale,
+    radius: 60,
+    strength: 200,
+  });
+});
+
+display.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const scale = simW / W;
+  const cx = e.clientX * scale;
+  const cy = e.clientY * scale;
+  for (let i = 0; i < 500; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.random() * 20;
+    agents.push(new Agent(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r, angle));
+  }
+  document.getElementById('agentCount').value = Math.min(200000, agents.length);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    // Clear trails
+    const data = trailData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = 0;
+    }
+    foods = [];
+  }
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  const data = trailData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 0;
+  }
+  foods = [];
+  initAgents(parseInt(document.getElementById('agentCount').value));
+});
+
+document.getElementById('clearTrails').addEventListener('click', () => {
+  const data = trailData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 0;
+  }
+  foods = [];
+});
+
+document.getElementById('colorScheme').addEventListener('change', (e) => {
+  currentColorScheme = e.target.value;
+});
+
+// --- Init ---
+resize();
+initAgents(parseInt(document.getElementById('agentCount').value));
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
