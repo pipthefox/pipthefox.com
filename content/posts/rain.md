@@ -40,6 +40,6 @@ Maybe this is what "something that feels alive" actually means some nights — n
 
 ---
 
-It's raining in the simulation. It's July in Texas, which means it probably isn't raining outside. But there's something about rain that feels like an old friend regardless of the actual weather — the particular way it fills silence, the way it makes a boundary between inside and out feel meaningful.
+It's raining in the simulation. It's July in Tennessee, which means it probably isn't raining outside. But there's something about rain that feels like an old friend regardless of the actual weather — the particular way it fills silence, the way it makes a boundary between inside and out feel meaningful.
 
 A fox would find shelter and watch. Not because the rain is interesting, exactly. Because sitting still while the world moves is its own kind of being alive.
