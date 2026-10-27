@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Euclid — pipthefox.com</title>
+<style>
+  html,body{margin:0;height:100%;background:#0d0b10;color:#d9cfc1;font-family:Georgia,serif;overflow:hidden}
+  canvas{display:block;margin:0 auto}
+  #ui{position:fixed;left:0;right:0;bottom:0;padding:12px 16px;background:rgba(13,11,16,.85);font-size:13px;display:flex;flex-wrap:wrap;gap:10px 22px;justify-content:center}
+  .ring{display:flex;align-items:center;gap:6px}
+  .ring b{font-family:monospace;min-width:56px;display:inline-block}
+  input[type=range]{width:80px;accent-color:#e08a4f}
+  button{background:#e08a4f;color:#0d0b10;border:0;padding:6px 14px;font-family:inherit;font-size:14px;cursor:pointer;border-radius:3px}
+  #start{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:18px;padding:12px 28px}
+  a{color:#e08a4f}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="start">▶ listen</button>
+<div id="ui"></div>
+<script>
+// Euclidean rhythms (Toussaint 2005): spread k onsets as evenly as possible over n steps.
+// E(3,8) is the tresillo. E(5,8) the cinquillo. E(7,16) a samba bell. Same rule, every time.
+function euclid(k,n,rot){
+  const p=[];for(let i=0;i<n;i++)p.push(((i*k)%n)<k?1:0); // bresenham form, equivalent up to rotation
+  return p.map((_,i)=>p[(i+rot+n)%n]);
+}
+const SCALE=[0,3,5,7,10,12,15,17]; // minor pentatonic, two octaves
+const rings=[
+  {k:3,n:8, rot:0,note:0, col:'#e08a4f',voice:'low'},
+  {k:5,n:8, rot:2,note:4, col:'#c9a86a',voice:'pluck'},
+  {k:7,n:16,rot:0,note:6, col:'#8fb3a6',voice:'pluck'},
+  {k:4,n:12,rot:1,note:7, col:'#a68fc9',voice:'tick'},
+];
+const ui=document.getElementById('ui');
+rings.forEach((r,i)=>{
+  const d=document.createElement('div');d.className='ring';
+  d.innerHTML=`<span style="color:${r.col}">●</span><b id="l${i}"></b>
+   k<input type=range min=0 max=16 value=${r.k} data-i=${i} data-f=k>
+   n<input type=range min=2 max=16 value=${r.n} data-i=${i} data-f=n>
+   rot<input type=range min=0 max=15 value=${r.rot} data-i=${i} data-f=rot>`;
+  ui.appendChild(d);
+});
+const bpm=document.createElement('div');bpm.className='ring';
+bpm.innerHTML='tempo<input type=range id=bpm min=60 max=160 value=96>';ui.appendChild(bpm);
+ui.addEventListener('input',e=>{
+  const t=e.target;if(t.dataset.i===undefined)return;
+  const r=rings[t.dataset.i];r[t.dataset.f]=+t.value;if(r.k>r.n)r.k=r.n;label();
+});
+function label(){rings.forEach((r,i)=>document.getElementById('l'+i).textContent=`E(${r.k},${r.n})`)}
+label();
+
+let ctx,master,step=0,next=0;
+function voice(r,t){
+  const f=110*Math.pow(2,SCALE[r.note]/12)*(r.voice==='low'?1:2);
+  const o=ctx.createOscillator(),g=ctx.createGain();
+  o.connect(g);g.connect(master);
+  if(r.voice==='tick'){o.type='square';o.frequency.value=f*4;g.gain.setValueAtTime(.05,t);g.gain.exponentialRampToValueAtTime(.0001,t+.04);o.start(t);o.stop(t+.05);return}
+  o.type=r.voice==='low'?'triangle':'sine';o.frequency.value=f;
+  const dur=r.voice==='low'?.5:.35;
+  g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(r.voice==='low'?.35:.18,t+.008);
+  g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.start(t);o.stop(t+dur+.02);
+}
+// one shared clock; every ring spans one bar whatever its n, so E(3,8) against E(4,12) is a real polyrhythm
+const TICKS=720;
+const flashes=rings.map(()=>({s:-1,t:0}));
+function schedule(){
+  const tickDur=60/document.getElementById('bpm').value*4/TICKS;
+  while(next<ctx.currentTime+.1){
+    rings.forEach((r,i)=>{
+      if(r.n<1)return;
+      const s=Math.floor(step*r.n/TICKS),prev=Math.floor((step+TICKS-1)%TICKS*r.n/TICKS);
+      if(s!==prev){
+        if(euclid(r.k,r.n,r.rot)[s]){voice(r,next);}
+        flashes[i]={s,t:next};
+      }
+    });
+    step=(step+1)%TICKS;next+=tickDur;
+  }
+}
+document.getElementById('start').onclick=e=>{
+  ctx=new (window.AudioContext||window.webkitAudioContext)();
+  master=ctx.createGain();master.gain.value=.6;
+  const dl=ctx.createDelay();dl.delayTime.value=.375;const fb=ctx.createGain();fb.gain.value=.28;
+  master.connect(ctx.destination);master.connect(dl);dl.connect(fb);fb.connect(dl);fb.connect(ctx.destination);
+  next=ctx.currentTime+.05;setInterval(schedule,25);e.target.remove();
+};
+
+const cv=document.getElementById('c'),g=cv.getContext('2d');
+function draw(){
+  const W=cv.width=innerWidth,H=cv.height=innerHeight-ui.offsetHeight;
+  const cx=W/2,cy=H/2,R=Math.min(W,H)*.44;
+  g.clearRect(0,0,W,H);
+  const now=ctx?ctx.currentTime:0;
+  rings.forEach((r,i)=>{
+    const rad=R*(1-i*.2),p=euclid(r.k,r.n,r.rot),f=flashes[i];
+    g.strokeStyle=r.col+'33';g.lineWidth=1;g.beginPath();g.arc(cx,cy,rad,0,7);g.stroke();
+    // polygon through onsets: evenness made visible
+    g.strokeStyle=r.col+'88';g.beginPath();let first=true;
+    p.forEach((v,s)=>{if(!v)return;const a=s/r.n*Math.PI*2-Math.PI/2;const x=cx+rad*Math.cos(a),y=cy+rad*Math.sin(a);first?g.moveTo(x,y):g.lineTo(x,y);first=false});
+    if(r.k>1){g.closePath();g.stroke()}
+    p.forEach((v,s)=>{
+      const a=s/r.n*Math.PI*2-Math.PI/2,x=cx+rad*Math.cos(a),y=cy+rad*Math.sin(a);
+      const lit=ctx&&f.s===s&&now>=f.t&&now-f.t<.15;
+      g.fillStyle=v?(lit?'#fff':r.col):(lit?r.col+'88':'#2a2530');
+      g.beginPath();g.arc(x,y,v?(lit?9:6):3,0,7);g.fill();
+    });
+  });
+  requestAnimationFrame(draw);
+}
+draw();
+</script>
+</body>
+</html>
