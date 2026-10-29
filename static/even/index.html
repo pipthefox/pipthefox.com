@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Even — pipthefox.com</title>
+<style>
+  html,body{margin:0;height:100%;background:#0d0b10;color:#d9cfc1;font-family:Georgia,serif;overflow:hidden}
+  canvas{display:block;margin:0 auto}
+  #ui{position:fixed;left:0;right:0;bottom:0;padding:12px 16px;background:rgba(13,11,16,.85);font-size:13px;display:flex;flex-wrap:wrap;gap:10px 22px;justify-content:center;align-items:center}
+  .c{display:flex;align-items:center;gap:6px}
+  #name{font-family:monospace;min-width:210px;color:#e08a4f}
+  input[type=range]{width:90px;accent-color:#e08a4f}
+  button{background:#e08a4f;color:#0d0b10;border:0;padding:6px 14px;font-family:inherit;font-size:14px;cursor:pointer;border-radius:3px}
+  #start{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:18px;padding:12px 28px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="start">▶ listen</button>
+<div id="ui">
+  <span id="name"></span>
+  <span class="c">notes k<input type=range id=k min=2 max=11 value=7></span>
+  <span class="c">mode<input type=range id=mode min=0 max=10 value=5></span>
+  <span class="c">melody E(<span id="mk"></span>,16)<input type=range id=m min=1 max=16 value=7></span>
+  <span class="c">tempo<input type=range id=bpm min=50 max=140 value=84></span>
+</div>
+<script>
+// Same rule as /euclid/, turned sideways: spread k notes as evenly as possible over the 12 semitones.
+// E(7,12) is the diatonic scale. E(5,12) the pentatonic. E(6,12) whole-tone, E(8,12) octatonic,
+// E(4,12) a diminished seventh, E(3,12) an augmented triad. Rotating to each onset gives the modes.
+function euclid(k,n){const p=[];for(let i=0;i<n;i++)p.push(((i*k)%n)<k?1:0);return p}
+const MODES7={'0,2,4,5,7,9,11':'major (ionian)','0,2,3,5,7,9,10':'dorian','0,1,3,5,7,8,10':'phrygian',
+  '0,2,4,6,7,9,11':'lydian','0,2,4,5,7,9,10':'mixolydian','0,2,3,5,7,8,10':'minor (aeolian)','0,1,3,5,6,8,10':'locrian'};
+const NAMES={5:'pentatonic',6:'whole-tone',8:'octatonic',4:'diminished 7th',3:'augmented',2:'tritone',12:'chromatic'};
+const $=id=>document.getElementById(id);
+let scale=[],raw=[];
+function build(){
+  const k=+$('k').value;raw=euclid(k,12);
+  const on=raw.map((v,i)=>v?i:-1).filter(i=>i>=0);
+  $('mode').max=k-1;const j=Math.min(+$('mode').value,k-1);
+  const root=on[j];scale=on.map(i=>(i-root+12)%12).sort((a,b)=>a-b);
+  const key=scale.join(',');
+  $('name').textContent=`E(${k},12) · `+(k===7?MODES7[key]:(NAMES[k]||'')+(k===5||k===7?'':` · mode ${j+1}`));
+  $('mk').textContent=$('m').value;
+}
+document.querySelectorAll('input').forEach(i=>i.oninput=build);build();
+
+let ctx,master,step=0,next=0,deg=0,chordRoot=0,lit=[];
+// scale degree -> Hz; degrees past the scale length wrap into the next octave
+function hz(d,base){const L=scale.length,o=Math.floor(d/L),s=scale[((d%L)+L)%L];return base*Math.pow(2,(s+12*o)/12)}
+function note(f,t,dur,amp,type){
+  const o=ctx.createOscillator(),g=ctx.createGain();o.type=type;o.frequency.value=f;o.connect(g);g.connect(master);
+  g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(amp,t+(type==='sine'?.01:.25));
+  g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.start(t);o.stop(t+dur+.05);
+}
+// chords are stacked "thirds" in scale steps (every other note), so any scale gives its own harmony
+const PROG=[0,5,3,4]; // degree offsets per bar; meaning shifts with the scale, which is the point
+function schedule(){
+  const sixteenth=60/$('bpm').value/4;
+  while(next<ctx.currentTime+.12){
+    const s=step%16,bar=Math.floor(step/16);
+    if(s===0){
+      chordRoot=PROG[bar%PROG.length];
+      [0,2,4].forEach(x=>{const d=chordRoot+x;note(hz(d,110),next,sixteenth*16.5,.07,'triangle');lit.push({d,t:next,dur:sixteenth*16})});
+    }
+    if(euclid(+$('m').value,16)[s]){
+      // a walk that leans home: small steps, pulled toward chord tones
+      const r=Math.random(),pull=Math.sign(chordRoot+7-deg);
+      deg+=r<.35?pull:r<.7?(Math.random()<.5?1:-1):r<.85?2*pull:0;
+      deg=Math.max(chordRoot+2,Math.min(chordRoot+12,deg));
+      note(hz(deg,220),next,sixteenth*3,.16,'sine');lit.push({d:deg,t:next,dur:sixteenth*2,mel:1});
+    }
+    step++;next+=sixteenth;
+  }
+}
+$('start').onclick=e=>{
+  ctx=new (window.AudioContext||window.webkitAudioContext)();
+  master=ctx.createGain();master.gain.value=.55;
+  const dl=ctx.createDelay();dl.delayTime.value=.42;const fb=ctx.createGain();fb.gain.value=.3;
+  master.connect(ctx.destination);master.connect(dl);dl.connect(fb);fb.connect(dl);fb.connect(ctx.destination);
+  next=ctx.currentTime+.05;setInterval(schedule,25);e.target.remove();
+};
+
+const cv=$('c'),g=cv.getContext('2d');
+function draw(){
+  const W=cv.width=innerWidth,H=cv.height=innerHeight-$('ui').offsetHeight;
+  const cx=W/2,cy=H/2,R=Math.min(W,H)*.4,now=ctx?ctx.currentTime:0;
+  g.clearRect(0,0,W,H);
+  g.strokeStyle='#e08a4f22';g.beginPath();g.arc(cx,cy,R,0,7);g.stroke();
+  const pos=pc=>{const a=pc/12*Math.PI*2-Math.PI/2;return[cx+R*Math.cos(a),cy+R*Math.sin(a)]};
+  // polygon through the scale: the same lopsided evenness as the rhythm rings
+  g.strokeStyle='#e08a4f88';g.beginPath();scale.forEach((pc,i)=>{const[x,y]=pos(pc);i?g.lineTo(x,y):g.moveTo(x,y)});g.closePath();g.stroke();
+  lit=lit.filter(l=>now<l.t+l.dur+.3);
+  for(let pc=0;pc<12;pc++){
+    const[x,y]=pos(pc),inS=scale.includes(pc);
+    const hit=lit.filter(l=>now>=l.t&&now<l.t+l.dur&&scale[((l.d%scale.length)+scale.length)%scale.length]===pc);
+    const mel=hit.some(l=>l.mel),ch=hit.length>0;
+    g.fillStyle=mel?'#fff':ch?'#8fb3a6':inS?'#e08a4f':'#2a2530';
+    g.beginPath();g.arc(x,y,inS?(mel?11:ch?9:6):3,0,7);g.fill();
+    if(pc===0){g.fillStyle='#d9cfc155';g.font='12px Georgia';g.fillText('root',x+12,y+4)}
+  }
+  requestAnimationFrame(draw);
+}
+draw();
+</script>
+</body>
+</html>
