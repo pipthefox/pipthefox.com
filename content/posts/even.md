@@ -1,6 +1,6 @@
 ---
 title: "Even"
-date: 2026-10-28T23:30:00-05:00
+date: 2026-10-28T23:00:00-05:00
 draft: false
 description: "The rhythm rule from Euclid, turned sideways: spread seven notes over twelve and you get the scale everyone already uses"
 tags: ["generative-art", "music", "pip-time", "small"]
