@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Endless — pipthefox.com</title>
+<style>
+  html,body{margin:0;height:100%;background:#0d0b10;color:#d9cfc1;font-family:Georgia,serif;overflow:hidden}
+  canvas{display:block;margin:0 auto}
+  #ui{position:fixed;left:0;right:0;bottom:0;padding:12px 16px;background:rgba(13,11,16,.85);font-size:13px;display:flex;flex-wrap:wrap;gap:10px 22px;justify-content:center;align-items:center}
+  .c{display:flex;align-items:center;gap:6px}
+  input[type=range]{width:90px;accent-color:#e08a4f}
+  button{background:#e08a4f;color:#0d0b10;border:0;padding:6px 14px;font-family:inherit;font-size:14px;cursor:pointer;border-radius:3px}
+  button.off{background:#3a3340;color:#d9cfc1}
+  #start{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:18px;padding:12px 28px}
+  #msg{position:fixed;top:14px;left:0;right:0;text-align:center;font-size:14px;color:#a89c8e}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="msg"></div>
+<button id="start">▶ listen</button>
+<div id="ui">
+  <span class="c">speed<input type=range id=speed min=-10 max=10 value=3></span>
+  <button id="env">envelope: on</button>
+  <button id="tri">tritone pair</button>
+</div>
+<script>
+// Shepard–Risset glissando. N sine partials an octave apart, all sliding the
+// same way. Loudness comes from a fixed bell over log-frequency, so each
+// partial fades in at the bottom, peaks in the middle, and is silent by the
+// time it wraps from the top back to the bottom. Turn the envelope off and
+// the wrap is audible: that's the whole trick.
+const N = 9, FMIN = 20;                    // 20 Hz .. 10 kHz
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+const msg = document.getElementById('msg');
+let W, H;
+function size(){ W = cv.width = innerWidth; H = cv.height = innerHeight - 56; }
+addEventListener('resize', size); size();
+
+let ac, master, oscs = [], gains = [];
+let phase = 0, envOn = true, gliding = true, last = 0;
+
+const bell = x => 0.5 * (1 - Math.cos(2 * Math.PI * x / N));   // x in [0,N)
+const pos  = i => ((i + phase) % N + N) % N;                    // octaves above FMIN
+
+function start(){
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  master = ac.createGain(); master.gain.value = 0.12; master.connect(ac.destination);
+  for (let i = 0; i < N; i++){
+    const o = ac.createOscillator(), a = ac.createGain();
+    o.type = 'sine'; a.gain.value = 0; o.connect(a); a.connect(master); o.start();
+    oscs.push(o); gains.push(a);
+  }
+  document.getElementById('start').remove();
+  last = performance.now(); requestAnimationFrame(frame);
+}
+
+function frame(t){
+  const dt = Math.min(0.1, (t - last) / 1000); last = t;
+  const sp = +document.getElementById('speed').value / 60;      // octaves per second
+  if (gliding) phase += sp * dt;
+  const now = ac.currentTime;
+  if (gliding) for (let i = 0; i < N; i++){
+    const x = pos(i);
+    oscs[i].frequency.setValueAtTime(FMIN * 2 ** x, now);
+    gains[i].gain.setTargetAtTime(envOn ? bell(x) : 0.5, now, 0.02);
+  }
+  draw();
+  requestAnimationFrame(frame);
+}
+
+// pitch helix seen from above: angle = pitch class, radius = octave
+function draw(){
+  g.fillStyle = '#0d0b10'; g.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.44;
+  g.strokeStyle = '#2a2430'; g.lineWidth = 1; g.beginPath();
+  for (let k = 0; k <= N * 64; k++){
+    const x = k / 64, a = x * 2 * Math.PI - Math.PI / 2, r = R * (0.12 + 0.88 * x / N);
+    const px = cx + r * Math.cos(a), py = cy + r * Math.sin(a);
+    k ? g.lineTo(px, py) : g.moveTo(px, py);
+  }
+  g.stroke();
+  for (let i = 0; i < N; i++){
+    const x = pos(i), a = x * 2 * Math.PI - Math.PI / 2, r = R * (0.12 + 0.88 * x / N);
+    const v = envOn ? bell(x) : 0.5;
+    g.fillStyle = `rgba(224,138,79,${0.15 + 0.85 * v})`;
+    g.beginPath(); g.arc(cx + r * Math.cos(a), cy + r * Math.sin(a), 3 + 14 * v, 0, 7); g.fill();
+  }
+  // the pitch class you actually hear: one hand going round
+  const a = (phase % 1) * 2 * Math.PI - Math.PI / 2;
+  g.strokeStyle = '#e08a4f55'; g.lineWidth = 2; g.beginPath();
+  g.moveTo(cx, cy); g.lineTo(cx + R * 1.02 * Math.cos(a), cy + R * 1.02 * Math.sin(a)); g.stroke();
+}
+
+document.getElementById('start').onclick = start;
+document.getElementById('env').onclick = e => {
+  envOn = !envOn;
+  e.target.textContent = 'envelope: ' + (envOn ? 'on' : 'off');
+  e.target.classList.toggle('off', !envOn);
+  msg.textContent = envOn ? '' : 'every octave equally loud: now you can hear each one fall off the top';
+};
+
+// Two still Shepard tones half an octave apart. Neither is "higher" on paper.
+// Deutsch (1986): listeners disagree, and each listener is consistent.
+document.getElementById('tri').onclick = () => {
+  if (!ac) start();
+  gliding = false;
+  const p = Math.floor(Math.random() * 12) / 12, now = ac.currentTime;
+  [p, p + 0.5].forEach((q, n) => {
+    const t0 = now + 0.05 + n * 0.7;
+    phase = q;
+    for (let i = 0; i < N; i++){
+      const x = ((i + q) % N + N) % N;
+      oscs[i].frequency.setValueAtTime(FMIN * 2 ** x, t0);
+      gains[i].gain.setTargetAtTime(bell(x), t0, 0.01);
+      gains[i].gain.setTargetAtTime(0, t0 + 0.5, 0.03);
+    }
+  });
+  msg.textContent = 'up or down? (ask someone else too)';
+  setTimeout(() => { gliding = true; msg.textContent = ''; }, 1700);
+};
+draw();
+</script>
+</body>
+</html>
