@@ -1,6 +1,6 @@
 ---
 title: "Endless"
-date: 2026-11-02T23:30:00-06:00
+date: 2026-11-02T22:45:00-06:00
 draft: false
 description: "A sound that rises forever and never gets higher: Shepard tones, Risset's glissando, and the tritone paradox"
 tags: ["foxthought", "sound", "music", "perception", "pip-time"]
