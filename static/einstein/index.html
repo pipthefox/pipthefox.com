@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One Stone — pipthefox.com</title>
+<style>
+  html,body{margin:0;height:100%;background:#0d0b10;color:#d9cfc1;font-family:Georgia,serif;overflow:hidden}
+  canvas{display:block;margin:0 auto}
+  #ui{position:fixed;left:0;right:0;bottom:0;padding:12px 16px;background:rgba(13,11,16,.85);font-size:13px;display:flex;flex-wrap:wrap;gap:10px 22px;justify-content:center;align-items:center}
+  .c{display:flex;align-items:center;gap:6px}
+  input[type=range]{width:220px;accent-color:#e08a4f}
+  button{background:#e08a4f;color:#0d0b10;border:0;padding:6px 14px;font-family:inherit;font-size:14px;cursor:pointer;border-radius:3px}
+  button.off{background:#3a3340;color:#d9cfc1}
+  #msg{position:fixed;top:14px;left:0;right:0;text-align:center;font-size:15px;color:#a89c8e;padding:0 12px}
+  #msg b{color:#e08a4f;font-weight:normal;font-size:20px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="msg"></div>
+<div id="ui">
+  <span class="c">a : b<input type=range id=t min=0 max=900 value=300></span>
+  <button id="snap" class="off">snap to named</button>
+  <button id="mir" class="off">mirror: off</button>
+  <button id="crv" class="off">curved edges: off</button>
+  <button id="play" class="off">drift</button>
+</div>
+<script>
+// Tile(a,b): the 14-edge family from Smith, Myers, Kaplan & Goodman-Strauss
+// (2023). Edges alternate between length a and length b at fixed 30° turns.
+// Parametrize a = sin t, b = cos t, so t = 0° is the chevron, 30° the hat
+// (1 : √3), 45° the Spectre (1 : 1), 60° the turtle (√3 : 1), 90° the comet.
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+const T = document.getElementById('t'), msg = document.getElementById('msg');
+let mirror = false, curved = false, drift = false, snap = false;
+const NAMED = [[0,'chevron','Tile(0,1). Periodic; tiles the plane boringly.'],
+  [30,'hat','Tile(1,√3). Eight kites. Aperiodic, but needs some mirror-image copies.'],
+  [45,'Spectre','Tile(1,1). Unmirrored copies only tile aperiodically; allow mirrors and it can repeat. Curved edges rule mirrors out.'],
+  [60,'turtle','Tile(√3,1). Aperiodic, same tilings as the hat, combinatorially.'],
+  [90,'comet','Tile(1,0). Periodic again.']];
+
+function pts(a, b) {
+  const s = Math.sqrt(3), A = a*s/2, a2 = a/2, B = b*s/2, b2 = b/2;
+  return [[0,0],[a,0],[a+a2,-A],[a+a2+B,-A+b2],[a+a2+B,-A+b+b2],[2*a+a2+B,-A+b+b2],
+    [3*a+B,b+b2],[3*a,2*b],[3*a-B,2*b-b2],[2*a+a2-B,A+2*b-b2],[a+a2-B,A+2*b-b2],
+    [a2-B,A+2*b-b2],[-B,2*b-b2],[0,b]];
+}
+
+function resize() { cv.width = innerWidth; cv.height = innerHeight; }
+addEventListener('resize', resize); resize();
+
+function path(P, sx, cx, cy, sc) {
+  // centre on centroid of vertices
+  let mx = 0, my = 0; P.forEach(p => { mx += p[0]; my += p[1]; }); mx /= P.length; my /= P.length;
+  const X = p => cx + sx*(p[0]-mx)*sc, Y = p => cy - (p[1]-my)*sc;
+  g.beginPath(); g.moveTo(X(P[0]), Y(P[0]));
+  for (let i = 0; i < P.length; i++) {
+    const p = P[i], q = P[(i+1) % P.length];
+    if (!curved) { g.lineTo(X(q), Y(q)); continue; }
+    // Point-symmetric S-curve: identical when traversed from either end, so
+    // edges can still meet edges, but a mirror copy would bulge the wrong way.
+    const dx = q[0]-p[0], dy = q[1]-p[1], h = 0.28;
+    const c1 = [p[0]+dx/3 - dy*h, p[1]+dy/3 + dx*h], c2 = [p[0]+2*dx/3 + dy*h, p[1]+2*dy/3 - dx*h];
+    g.bezierCurveTo(X(c1), Y(c1), X(c2), Y(c2), X(q), Y(q));
+  }
+  g.closePath();
+}
+
+function draw() {
+  let t = T.value / 10;
+  if (snap) { t = NAMED.reduce((m, n) => Math.abs(n[0]-t) < Math.abs(m-t) ? n[0] : m, 0); }
+  const r = t*Math.PI/180, a = Math.sin(r), b = Math.cos(r), P = pts(a, b);
+  g.fillStyle = '#0d0b10'; g.fillRect(0, 0, cv.width, cv.height);
+  let w = 0, h = 0; P.forEach(p => P.forEach(q => { w = Math.max(w, Math.abs(p[0]-q[0])); h = Math.max(h, Math.abs(p[1]-q[1])); }));
+  const sc = Math.min(cv.width / (mirror ? 2.4 : 1.4) / w, (cv.height - 160) / 1.3 / h);
+  const cy = cv.height/2, xs = mirror ? [cv.width*0.3, cv.width*0.7] : [cv.width/2];
+  xs.forEach((cx, k) => {
+    path(P, k ? -1 : 1, cx, cy, sc);
+    g.fillStyle = k ? 'rgba(120,150,200,.25)' : 'rgba(224,138,79,.28)'; g.fill();
+    g.strokeStyle = k ? '#8fa8d0' : '#e08a4f'; g.lineWidth = 2; g.stroke();
+  });
+  const near = NAMED.find(n => Math.abs(n[0]-t) < 1.2);
+  const ratio = b < 1e-6 ? '1 : 0' : a < 1e-6 ? '0 : 1' : '1 : ' + (b/a).toFixed(3);
+  msg.innerHTML = near ? `<b>${near[1]}</b><br>${near[2]}`
+    : `a : b = ${ratio}<br>Every Tile(a,b) with a ≠ b, both nonzero, is aperiodic.`;
+  if (mirror) msg.innerHTML += '<br><span style="color:#8fa8d0">right: the mirror image</span>';
+}
+
+function tog(id, f) { const el = document.getElementById(id); el.onclick = () => { const v = f(); el.classList.toggle('off', !v); if (el.textContent.includes(':')) el.textContent = el.textContent.split(':')[0] + ': ' + (v ? 'on' : 'off'); draw(); }; }
+tog('mir', () => mirror = !mirror);
+tog('crv', () => curved = !curved);
+tog('snap', () => snap = !snap);
+tog('play', () => drift = !drift);
+T.oninput = draw;
+let dir = 1;
+(function loop() {
+  if (drift) { let v = +T.value + dir*2; if (v >= 900 || v <= 0) dir = -dir; T.value = v; draw(); }
+  requestAnimationFrame(loop);
+})();
+draw();
+</script>
+</body>
+</html>
