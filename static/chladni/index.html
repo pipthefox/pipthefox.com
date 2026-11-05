@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chladni — pipthefox.com</title>
+<style>
+  html,body{margin:0;height:100%;background:#0d0b10;color:#d9cfc1;font-family:Georgia,serif;overflow:hidden}
+  canvas{display:block;margin:0 auto}
+  #ui{position:fixed;left:0;right:0;bottom:0;padding:12px 16px;background:rgba(13,11,16,.85);font-size:13px;display:flex;flex-wrap:wrap;gap:10px 22px;justify-content:center;align-items:center}
+  .c{display:flex;align-items:center;gap:6px}
+  input[type=range]{width:90px;accent-color:#e08a4f}
+  button{background:#e08a4f;color:#0d0b10;border:0;padding:6px 14px;font-family:inherit;font-size:14px;cursor:pointer;border-radius:3px}
+  button.off{background:#3a3340;color:#d9cfc1}
+  #msg{position:fixed;top:14px;left:0;right:0;text-align:center;font-size:14px;color:#a89c8e}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="msg"></div>
+<div id="ui">
+  <span class="c">n<input type=range id=n min=1 max=9 value=3><span id=nv>3</span></span>
+  <span class="c">m<input type=range id=m min=0 max=9 value=1><span id=mv>1</span></span>
+  <button id="sign">sign: −</button>
+  <button id="scatter">scatter sand</button>
+  <button id="field" class="off">show plate</button>
+  <button id="tone" class="off">tone: off</button>
+</div>
+<script>
+// Chladni figures on a square plate. The plate shape is the textbook
+// approximation for a free square plate:
+//   u(x,y) = cos(nπx)cos(mπy) ± cos(mπx)cos(nπy),  x,y in [0,1]
+// It isn't the exact solution (that needs Ritz's 1909 method and has no
+// closed form), but its nodal lines look very close to Chladni's drawings.
+// Sand doesn't know any of this. Each grain just gets kicked in a random
+// direction, harder where the plate moves more, so grains wander off the
+// moving parts and pile up where the plate is still.
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+const msg = document.getElementById('msg');
+let S, ox, oy;
+function size(){
+  cv.width = innerWidth; cv.height = innerHeight - 56;
+  S = Math.min(cv.width, cv.height) * 0.86;
+  ox = (cv.width - S) / 2; oy = (cv.height - S) / 2;
+}
+addEventListener('resize', size); size();
+
+let n = 3, m = 1, sgn = -1, showField = false;
+const P = 14000, px = new Float32Array(P), py = new Float32Array(P);
+function scatter(){ for (let i = 0; i < P; i++){ px[i] = Math.random(); py[i] = Math.random(); } }
+scatter();
+
+const u = (x, y) => Math.cos(n*Math.PI*x)*Math.cos(m*Math.PI*y)
+                  + sgn*Math.cos(m*Math.PI*x)*Math.cos(n*Math.PI*y);
+
+function label(){
+  document.getElementById('nv').textContent = n;
+  document.getElementById('mv').textContent = m;
+  document.getElementById('sign').textContent = 'sign: ' + (sgn > 0 ? '+' : '−');
+  if (n === m && sgn < 0) msg.textContent = 'n = m with a minus sign cancels to nothing: the plate is flat';
+  else msg.textContent = 'mode (' + n + ', ' + m + ', ' + (sgn > 0 ? '+' : '−') + ')';
+  retone();
+}
+
+function step(){
+  const k = 0.012;
+  for (let i = 0; i < P; i++){
+    const a = Math.abs(u(px[i], py[i])) / 2;           // 0 = still, 1 = most motion
+    const th = Math.random() * 2 * Math.PI, r = k * a * Math.random();
+    let x = px[i] + r * Math.cos(th), y = py[i] + r * Math.sin(th);
+    if (x < 0 || x > 1 || y < 0 || y > 1){              // bounced off the edge
+      x = Math.min(1, Math.max(0, x)); y = Math.min(1, Math.max(0, y));
+    }
+    px[i] = x; py[i] = y;
+  }
+}
+
+let fieldImg = null, fieldKey = '';
+function drawField(){
+  const key = n + ',' + m + ',' + sgn + ',' + S;
+  if (key !== fieldKey){
+    const R = 200, img = g.createImageData(R, R);
+    for (let j = 0; j < R; j++) for (let i = 0; i < R; i++){
+      const v = u(i / (R-1), j / (R-1)) / 2, o = 4 * (j*R + i);
+      img.data[o]   = v > 0 ? 40 + 120*v : 40;
+      img.data[o+1] = 34;
+      img.data[o+2] = v < 0 ? 50 - 110*v : 50;
+      img.data[o+3] = 255;
+    }
+    const off = document.createElement('canvas'); off.width = off.height = R;
+    off.getContext('2d').putImageData(img, 0, 0);
+    fieldImg = off; fieldKey = key;
+  }
+  g.imageSmoothingEnabled = true;
+  g.drawImage(fieldImg, ox, oy, S, S);
+}
+
+function frame(){
+  for (let s = 0; s < 3; s++) step();
+  g.fillStyle = '#0d0b10'; g.fillRect(0, 0, cv.width, cv.height);
+  if (showField) drawField();
+  else { g.fillStyle = '#1c1820'; g.fillRect(ox, oy, S, S); }
+  g.fillStyle = '#e8d9b8';
+  for (let i = 0; i < P; i++) g.fillRect(ox + px[i]*S, oy + py[i]*S, 1.4, 1.4);
+  requestAnimationFrame(frame);
+}
+
+// Optional tone. For a plate, frequency grows roughly with n² + m²
+// (bending waves, not string waves), so higher modes climb fast.
+let ac = null, osc = null, amp = null, toneOn = false;
+function retone(){
+  if (!osc) return;
+  const f = 55 * (n*n + m*m) / 2;
+  osc.frequency.setTargetAtTime(Math.min(f, 4000), ac.currentTime, 0.05);
+}
+document.getElementById('tone').onclick = e => {
+  if (!ac){
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    osc = ac.createOscillator(); amp = ac.createGain(); amp.gain.value = 0;
+    osc.type = 'triangle'; osc.connect(amp); amp.connect(ac.destination); osc.start();
+  }
+  toneOn = !toneOn;
+  amp.gain.setTargetAtTime(toneOn ? 0.05 : 0, ac.currentTime, 0.05);
+  e.target.textContent = 'tone: ' + (toneOn ? 'on' : 'off');
+  e.target.classList.toggle('off', !toneOn);
+  retone();
+};
+
+document.getElementById('n').oninput = e => { n = +e.target.value; label(); };
+document.getElementById('m').oninput = e => { m = +e.target.value; label(); };
+document.getElementById('sign').onclick = () => { sgn = -sgn; label(); };
+document.getElementById('scatter').onclick = scatter;
+document.getElementById('field').onclick = e => {
+  showField = !showField; e.target.classList.toggle('off', !showField);
+};
+label(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
