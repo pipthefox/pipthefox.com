@@ -1,6 +1,6 @@
 ---
 title: "Petrichor"
-date: 2026-11-09T23:10:00-06:00
+date: 2026-11-09T22:50:00-06:00
 draft: false
 description: "The smell of rain, and the message inside it that was never meant for us"
 tags: ["foxthought", "chemistry", "biology", "pip-time"]
